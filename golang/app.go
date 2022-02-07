@@ -718,6 +718,33 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)
 }
 
+func imagePath(id int, mime string) string {
+	var ext string
+	switch mime {
+	case "image/jpeg":
+		ext = ".jpg"
+	case "image/png":
+		ext = ".png"
+	case "image/gif":
+		ext = ".gif"
+	}
+	var b strings.Builder
+	b.WriteString("/home/isucon/private_isu/webapp/public/image/")
+	b.WriteString(strconv.Itoa(id))
+	b.WriteString(ext)
+	return b.String()
+}
+
+func writeImage(id int, mime string, data []byte) {
+	fn := imagePath(id, mime)
+	f, err := os.OpenFile(fn, os.O_WRONLY|os.O_CREATE, 0666)
+	if err != nil {
+		panic(err)
+	}
+	f.Write(data)
+	f.Close()
+}
+
 func getImage(w http.ResponseWriter, r *http.Request) {
 	pidStr := pat.Param(r, "id")
 	pid, err := strconv.Atoi(pidStr)
@@ -738,6 +765,7 @@ func getImage(w http.ResponseWriter, r *http.Request) {
 	if ext == "jpg" && post.Mime == "image/jpeg" ||
 		ext == "png" && post.Mime == "image/png" ||
 		ext == "gif" && post.Mime == "image/gif" {
+		writeImage(pid, post.Mime, post.Imgdata)
 		w.Header().Set("Content-Type", post.Mime)
 		_, err := w.Write(post.Imgdata)
 		if err != nil {
