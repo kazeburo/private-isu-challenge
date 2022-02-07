@@ -400,7 +400,7 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 		"u.del_flg AS `user.del_flg`, "+
 		"u.created_at AS `user.created_at` "+
 		"FROM `posts` p JOIN `users` u ON p.user_id = u.id "+
-		"ORDER BY `p.created_at` DESC")
+		"ORDER BY p.created_at DESC")
 	if err != nil {
 		log.Print(err)
 		return
@@ -558,7 +558,7 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 		"u.authority AS `user.authority`, "+
 		"u.del_flg AS `user.del_flg`, "+
 		"u.created_at AS `user.created_at` "+
-		"FROM `posts` p JOIN `users` u ON p.user_id = u.id WHERE `created_at` <= ? ORDER BY `p.created_at` DESC", t.Format(ISO8601Format))
+		"FROM `posts` p JOIN `users` u ON p.user_id = u.id WHERE p.created_at <= ? ORDER BY p.created_at DESC", t.Format(ISO8601Format))
 	if err != nil {
 		log.Print(err)
 		return
@@ -606,7 +606,7 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 		"u.authority AS `user.authority`, "+
 		"u.del_flg AS `user.del_flg`, "+
 		"u.created_at AS `user.created_at` "+
-		"FROM `posts` p JOIN `users` u ON p.user_id = u.id WHERE `p.id` = ?", pid)
+		"FROM `posts` p JOIN `users` u ON p.user_id = u.id WHERE p.id = ?", pid)
 	if err != nil {
 		log.Print(err)
 		return
