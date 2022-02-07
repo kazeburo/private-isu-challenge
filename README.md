@@ -139,3 +139,13 @@ score
 {"pass":true,"score":11923,"success":10318,"fail":0,"messages":[]}
 {"pass":true,"score":12334,"success":10726,"fail":0,"messages":[]}
 ```
+
+## Straight join
+
+score
+
+```
+{"pass":true,"score":23417,"success":18320,"fail":0,"messages":[]}
+{"pass":true,"score":22620,"success":17615,"fail":0,"messages":[]}
+{"pass":true,"score":22510,"success":17545,"fail":0,"messages":[]}
+```
