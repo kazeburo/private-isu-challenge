@@ -124,4 +124,18 @@ score
 {"pass":true,"score":21075,"success":16575,"fail":0,"messages":[]}
 ```
 
+## post_user_idx
 
+```
+mysql> ALTER TABLE posts ADD INDEX posts_user_idx (user_id, created_at DESC);
+Query OK, 0 rows affected (0.20 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+```
+
+score
+
+```
+{"pass":true,"score":11824,"success":10273,"fail":0,"messages":[]}
+{"pass":true,"score":11923,"success":10318,"fail":0,"messages":[]}
+{"pass":true,"score":12334,"success":10726,"fail":0,"messages":[]}
+```
