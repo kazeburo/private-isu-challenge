@@ -392,7 +392,7 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 		"p.user_id AS `user_id`,"+
 		"p.body AS `body`,"+
 		"p.mime AS `mime`,"+
-		"p.created_at AS `created_at`"+
+		"p.created_at AS `created_at`, "+
 		"u.id AS `user.id`, "+
 		"u.account_name AS `user.account_name`, "+
 		"u.passhash AS `user.passhash`, "+
@@ -451,7 +451,7 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 		"p.user_id AS `user_id`,"+
 		"p.body AS `body`,"+
 		"p.mime AS `mime`,"+
-		"p.created_at AS `created_at`"+
+		"p.created_at AS `created_at`, "+
 		"u.id AS `user.id`, "+
 		"u.account_name AS `user.account_name`, "+
 		"u.passhash AS `user.passhash`, "+
@@ -551,7 +551,7 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 		"p.user_id AS `user_id`,"+
 		"p.body AS `body`,"+
 		"p.mime AS `mime`,"+
-		"p.created_at AS `created_at`"+
+		"p.created_at AS `created_at`, "+
 		"u.id AS `user.id`, "+
 		"u.account_name AS `user.account_name`, "+
 		"u.passhash AS `user.passhash`, "+
@@ -599,7 +599,7 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 		"p.user_id AS `user_id`,"+
 		"p.body AS `body`,"+
 		"p.mime AS `mime`,"+
-		"p.created_at AS `created_at`"+
+		"p.created_at AS `created_at`, "+
 		"u.id AS `user.id`, "+
 		"u.account_name AS `user.account_name`, "+
 		"u.passhash AS `user.passhash`, "+
