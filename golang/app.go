@@ -191,7 +191,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 			"c.post_id AS `post_id`," +
 			"c.user_id AS `user_id`," +
 			"c.comment AS `comment`," +
-			"c.created_at AS `created_at" +
+			"c.created_at AS `created_at`," +
 			"u.id AS `user.id`, " +
 			"u.account_name AS `user.account_name`, " +
 			"u.passhash AS `user.passhash`, " +
