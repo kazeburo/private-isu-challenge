@@ -392,7 +392,7 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 
 	results := []Post{}
 
-	err := db.Select(&results, "SELECT "+
+	err := db.Select(&results, "SELECT STRAIGHT_JOIN "+
 		"p.id AS `id`,"+
 		"p.user_id AS `user_id`,"+
 		"p.body AS `body`,"+
@@ -452,7 +452,7 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 
 	results := []Post{}
 
-	err = db.Select(&results, "SELECT "+
+	err = db.Select(&results, "SELECT STRAIGHT_JOIN "+
 		"p.id AS `id`,"+
 		"p.user_id AS `user_id`,"+
 		"p.body AS `body`,"+
@@ -552,7 +552,7 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := []Post{}
-	err = db.Select(&results, "SELECT "+
+	err = db.Select(&results, "SELECT STRAIGHT_JOIN "+
 		"p.id AS `id`,"+
 		"p.user_id AS `user_id`,"+
 		"p.body AS `body`,"+
@@ -600,7 +600,7 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := []Post{}
-	err = db.Select(&results, "SELECT "+
+	err = db.Select(&results, "SELECT STRAIGHT_JOIN "+
 		"p.id AS `id`,"+
 		"p.user_id AS `user_id`,"+
 		"p.body AS `body`,"+
