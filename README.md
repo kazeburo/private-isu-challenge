@@ -95,3 +95,14 @@ score
 {"pass":true,"score":11597,"success":9701,"fail":0,"messages":[]}
 ```
 
+## JOIN
+
+score
+
+```
+{"pass":true,"score":10287,"success":8772,"fail":4,"messages":["response code should be 200, got 502 (GET /)","response code should be 200, got 502 (POST /login)"]}
+{"pass":true,"score":10491,"success":8938,"fail":0,"messages":[]}
+{"pass":true,"score":10371,"success":8774,"fail":0,"messages":[]}
+```
+
+
