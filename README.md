@@ -105,4 +105,14 @@ score
 {"pass":true,"score":10371,"success":8774,"fail":0,"messages":[]}
 ```
 
+## postsPerPage
+
+
+score
+
+```
+{"pass":true,"score":18957,"success":14918,"fail":0,"messages":[]}
+{"pass":true,"score":19263,"success":15201,"fail":0,"messages":[]}
+{"pass":true,"score":19088,"success":14943,"fail":0,"messages":[]}
+```
 

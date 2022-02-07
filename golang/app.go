@@ -400,7 +400,8 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 		"u.del_flg AS `user.del_flg`, "+
 		"u.created_at AS `user.created_at` "+
 		"FROM `posts` p JOIN `users` u ON p.user_id = u.id "+
-		"ORDER BY p.created_at DESC")
+		"WHERE u.del_flg = 0 "+
+		"ORDER BY p.created_at DESC LIMIT ?", postsPerPage)
 	if err != nil {
 		log.Print(err)
 		return
@@ -458,7 +459,7 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 		"u.authority AS `user.authority`, "+
 		"u.del_flg AS `user.del_flg`, "+
 		"u.created_at AS `user.created_at` "+
-		"FROM `posts` p JOIN `users` u ON p.user_id = u.id WHERE p.user_id = ? ORDER BY p.created_at DESC", user.ID)
+		"FROM `posts` p JOIN `users` u ON p.user_id = u.id WHERE p.user_id = ?  AND u.del_flg = 0 ORDER BY p.created_at DESC LIMIT ?", user.ID, postsPerPage)
 	if err != nil {
 		log.Print(err)
 		return
@@ -558,7 +559,7 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 		"u.authority AS `user.authority`, "+
 		"u.del_flg AS `user.del_flg`, "+
 		"u.created_at AS `user.created_at` "+
-		"FROM `posts` p JOIN `users` u ON p.user_id = u.id WHERE p.created_at <= ? ORDER BY p.created_at DESC", t.Format(ISO8601Format))
+		"FROM `posts` p JOIN `users` u ON p.user_id = u.id WHERE p.created_at <= ? AND u.del_flg = 0 ORDER BY p.created_at DESC LIMIT ?", t.Format(ISO8601Format), postsPerPage)
 	if err != nil {
 		log.Print(err)
 		return
@@ -606,7 +607,7 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 		"u.authority AS `user.authority`, "+
 		"u.del_flg AS `user.del_flg`, "+
 		"u.created_at AS `user.created_at` "+
-		"FROM `posts` p JOIN `users` u ON p.user_id = u.id WHERE p.id = ?", pid)
+		"FROM `posts` p JOIN `users` u ON p.user_id = u.id WHERE p.id = ? AND u.del_flg = 0 LIMIT ?", pid, postsPerPage)
 	if err != nil {
 		log.Print(err)
 		return
