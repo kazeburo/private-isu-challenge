@@ -399,7 +399,7 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 		"u.authority AS `user.authority`, "+
 		"u.del_flg AS `user.del_flg`, "+
 		"u.created_at AS `user.created_at` "+
-		"FROM `posts` p JOIN `users` u ON p.user_id = u.id"+
+		"FROM `posts` p JOIN `users` u ON p.user_id = u.id "+
 		"WHERE u.del_flg = 0 "+
 		"ORDER BY p.created_at DESC LIMIT ?", postsPerPage)
 	if err != nil {
