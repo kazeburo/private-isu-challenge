@@ -160,4 +160,55 @@ score
 {"pass":true,"score":24870,"success":19306,"fail":0,"messages":[]}
 ```
 
+## nginx静的ファイル
+
+```
+  location /css/ {
+    root /home/isucon/private_isu/webapp/public/;
+    expires 1d;
+  }
+
+  location /js/ {
+    root /home/isucon/private_isu/webapp/public/;
+    expires 1d;
+  }
+```
+
+score
+
+```
+{"pass":true,"score":24783,"success":19185,"fail":0,"messages":[]}
+{"pass":true,"score":25601,"success":19929,"fail":0,"messages":[]}
+{"pass":true,"score":24114,"success":18659,"fail":0,"messages":[]}
+```
+
+## nginx keepalive
+
+```
+upstream app {
+  server localhost:8080;
+  keepalive 100;
+  keepalive_requests 10000;
+}
+
+server {
+  location / {
+    proxy_set_header Host $host;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_pass http://app;
+    #proxy_pass http://localhost:8080;
+  }
+}
+```
+
+score
+
+```
+{"pass":true,"score":25181,"success":19458,"fail":0,"messages":[]}
+{"pass":true,"score":26567,"success":20568,"fail":0,"messages":[]}
+{"pass":true,"score":25108,"success":19349,"fail":0,"messages":[]}
+```
+
+
 
