@@ -221,3 +221,30 @@ score
 {"pass":true,"score":26218,"success":20275,"fail":0,"messages":[]}
 ```
 
+## imageをnginxで配信
+
+nginx
+
+```
+  location /image/ {
+    root /home/isucon/private_isu/webapp/public/;
+    try_files $uri $uri/ @app;
+    expires 1d;
+  }
+
+  location @app {
+    proxy_set_header Host $host;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_pass http://app;
+  }
+```
+
+score
+
+```
+{"pass":true,"score":102228,"success":96402,"fail":0,"messages":[]}
+{"pass":true,"score":99284,"success":93499,"fail":0,"messages":[]}
+{"pass":true,"score":103508,"success":97773,"fail":0,"messages":[]}
+```
+
