@@ -116,3 +116,12 @@ score
 {"pass":true,"score":19088,"success":14943,"fail":0,"messages":[]}
 ```
 
+## reduce N+1 in makePosts
+
+```
+{"pass":true,"score":20707,"success":16220,"fail":0,"messages":[]}
+{"pass":true,"score":20570,"success":16099,"fail":0,"messages":[]}
+{"pass":true,"score":21075,"success":16575,"fail":0,"messages":[]}
+```
+
+
