@@ -198,7 +198,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 			"u.authority AS `user.authority`, " +
 			"u.del_flg AS `user.del_flg`, " +
 			"u.created_at AS `user.created_at` " +
-			"FROM `comments` c ON `users` u ON c.user_id = u.id WHERE c.post_id = ? ORDER BY c.created_at DESC"
+			"FROM `comments` c JOIN `users` u ON c.user_id = u.id WHERE c.post_id = ? ORDER BY c.created_at DESC"
 		if !allComments {
 			query += " LIMIT 3"
 		}
