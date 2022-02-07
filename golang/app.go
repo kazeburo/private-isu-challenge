@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+
 	//"os/exec"
 	"path"
 	"regexp"
@@ -209,11 +210,6 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 
 		p.Comments = comments
 
-		err = db.Get(&p.User, "SELECT * FROM `users` WHERE `id` = ?", p.UserID)
-		if err != nil {
-			return nil, err
-		}
-
 		p.CSRFToken = csrfToken
 
 		if p.User.DelFlg == 0 {
@@ -391,7 +387,19 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 
 	results := []Post{}
 
-	err := db.Select(&results, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` ORDER BY `created_at` DESC")
+	err := db.Select(&results, "SELECT "+
+		"p.id AS `id`,"+
+		"p.user_id AS `user_id`,"+
+		"p.body AS `body`,"+
+		"p.mime AS `mime`,"+
+		"p.created_at AS `created_at`"+
+		"u.id AS `user.id`, "+
+		"u.account_name AS `user.account_name`, "+
+		"u.passhash AS `user.passhash`, "+
+		"u.authority AS `user.authority`, "+
+		"u.del_flg AS `user.del_flg`, "+
+		"u.created_at AS `user.created_at` "+
+		"ORDER BY `created_at` DESC")
 	if err != nil {
 		log.Print(err)
 		return
@@ -437,7 +445,19 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 
 	results := []Post{}
 
-	err = db.Select(&results, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `user_id` = ? ORDER BY `created_at` DESC", user.ID)
+	err = db.Select(&results, "SELECT "+
+		"p.id AS `id`,"+
+		"p.user_id AS `user_id`,"+
+		"p.body AS `body`,"+
+		"p.mime AS `mime`,"+
+		"p.created_at AS `created_at`"+
+		"u.id AS `user.id`, "+
+		"u.account_name AS `user.account_name`, "+
+		"u.passhash AS `user.passhash`, "+
+		"u.authority AS `user.authority`, "+
+		"u.del_flg AS `user.del_flg`, "+
+		"u.created_at AS `user.created_at` "+
+		"WHERE `user_id` = ? ORDER BY `created_at` DESC", user.ID)
 	if err != nil {
 		log.Print(err)
 		return
@@ -525,7 +545,19 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := []Post{}
-	err = db.Select(&results, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `created_at` <= ? ORDER BY `created_at` DESC", t.Format(ISO8601Format))
+	err = db.Select(&results, "SELECT "+
+		"p.id AS `id`,"+
+		"p.user_id AS `user_id`,"+
+		"p.body AS `body`,"+
+		"p.mime AS `mime`,"+
+		"p.created_at AS `created_at`"+
+		"u.id AS `user.id`, "+
+		"u.account_name AS `user.account_name`, "+
+		"u.passhash AS `user.passhash`, "+
+		"u.authority AS `user.authority`, "+
+		"u.del_flg AS `user.del_flg`, "+
+		"u.created_at AS `user.created_at` "+
+		"FROM `posts` p JOIN `users` u ON p.user_id = u.id WHERE `created_at` <= ? ORDER BY `created_at` DESC", t.Format(ISO8601Format))
 	if err != nil {
 		log.Print(err)
 		return
@@ -561,7 +593,19 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := []Post{}
-	err = db.Select(&results, "SELECT * FROM `posts` WHERE `id` = ?", pid)
+	err = db.Select(&results, "SELECT "+
+		"p.id AS `id`,"+
+		"p.user_id AS `user_id`,"+
+		"p.body AS `body`,"+
+		"p.mime AS `mime`,"+
+		"p.created_at AS `created_at`"+
+		"u.id AS `user.id`, "+
+		"u.account_name AS `user.account_name`, "+
+		"u.passhash AS `user.passhash`, "+
+		"u.authority AS `user.authority`, "+
+		"u.del_flg AS `user.del_flg`, "+
+		"u.created_at AS `user.created_at` "+
+		"FROM `posts` p JOIN `users` u ON p.user_id = u.id WHERE `id` = ?", pid)
 	if err != nil {
 		log.Print(err)
 		return
