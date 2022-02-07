@@ -27,3 +27,71 @@ score
 {"pass":true,"score":11715,"success":9938,"fail":0,"messages":[]}
 {"pass":true,"score":11207,"success":9529,"fail":0,"messages":[]}
 ```
+
+## my.conf
+
+追加
+
+```
+innodb_flush_method=O_DIRECT
+innodb_flush_log_at_trx_commit = 2
+disable-log-bin = 1
+```
+
+score
+
+```
+{"pass":true,"score":11087,"success":9361,"fail":0,"messages":[]}
+{"pass":true,"score":11533,"success":9674,"fail":0,"messages":[]}
+{"pass":true,"score":11221,"success":9507,"fail":0,"messages":[]}
+```
+
+## post_id_idx 張り替え
+
+```
+mysql> ALTER TABLE `comments` DROP INDEX `post_id_idx`, ADD INDEX `post_id_idx` (`post_id`, `created_at` DESC);
+Query OK, 0 rows affected (0.42 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+```
+
+score
+
+```
+{"pass":true,"score":11379,"success":9617,"fail":0,"messages":[]}
+{"pass":true,"score":11106,"success":9315,"fail":0,"messages":[]}
+{"pass":true,"score":11135,"success":9352,"fail":0,"messages":[]}
+```
+
+## order by狙いのkey
+
+```
+mysql> alter table posts add index posts_order_idx (created_at DESC);
+Query OK, 0 rows affected (0.05 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+```
+
+score
+
+
+```
+{"pass":true,"score":11338,"success":9562,"fail":0,"messages":[]}
+{"pass":true,"score":11295,"success":9499,"fail":0,"messages":[]}
+{"pass":true,"score":11330,"success":9481,"fail":0,"messages":[]}
+```
+
+## user_idx追加
+
+```
+mysql> ALTER TABLE `comments` ADD INDEX `idx_user_id` (`user_id`);
+Query OK, 0 rows affected (0.34 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+```
+
+score
+
+```
+{"pass":true,"score":12208,"success":10351,"fail":0,"messages":[]}
+{"pass":true,"score":11716,"success":9811,"fail":0,"messages":[]}
+{"pass":true,"score":11597,"success":9701,"fail":0,"messages":[]}
+```
+
