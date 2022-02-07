@@ -211,4 +211,13 @@ score
 ```
 
 
+## 外部コマンド
+
+score
+
+```
+{"pass":true,"score":25820,"success":19993,"fail":0,"messages":[]}
+{"pass":true,"score":26260,"success":20327,"fail":0,"messages":[]}
+{"pass":true,"score":26218,"success":20275,"fail":0,"messages":[]}
+```
 
