@@ -458,7 +458,7 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 		"u.authority AS `user.authority`, "+
 		"u.del_flg AS `user.del_flg`, "+
 		"u.created_at AS `user.created_at` "+
-		"WHERE p.user_id = ? ORDER BY p.created_at DESC", user.ID)
+		"FROM `posts` p JOIN `users` u ON p.user_id = u.id WHERE p.user_id = ? ORDER BY p.created_at DESC", user.ID)
 	if err != nil {
 		log.Print(err)
 		return
