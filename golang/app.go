@@ -399,6 +399,7 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 		"u.authority AS `user.authority`, "+
 		"u.del_flg AS `user.del_flg`, "+
 		"u.created_at AS `user.created_at` "+
+		"FROM `posts` p JOIN `users` u ON p.user_id = u.id "+
 		"ORDER BY `created_at` DESC")
 	if err != nil {
 		log.Print(err)
