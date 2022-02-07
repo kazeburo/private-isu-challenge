@@ -149,3 +149,15 @@ score
 {"pass":true,"score":22620,"success":17615,"fail":0,"messages":[]}
 {"pass":true,"score":22510,"success":17545,"fail":0,"messages":[]}
 ```
+
+## tune mysql driver
+
+score
+
+```
+{"pass":true,"score":26054,"success":20131,"fail":0,"messages":[]}
+{"pass":true,"score":24823,"success":19254,"fail":0,"messages":[]}
+{"pass":true,"score":24870,"success":19306,"fail":0,"messages":[]}
+```
+
+
