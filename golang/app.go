@@ -453,7 +453,7 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 
 	results := []Post{}
 
-	err = db.Select(&results, "SELECT STRAIGHT_JOIN "+
+	err = db.Select(&results, "SELECT "+
 		"p.id AS `id`,"+
 		"p.user_id AS `user_id`,"+
 		"p.body AS `body`,"+
