@@ -314,5 +314,10 @@ Query OK, 0 rows affected (0.00 sec)
 
 mysql> DELIMITER ;
 ```
+score
 
-
+```
+{"pass":true,"score":136117,"success":128770,"fail":0,"messages":[]}
+{"pass":true,"score":133864,"success":126304,"fail":0,"messages":[]}
+{"pass":true,"score":129888,"success":122383,"fail":0,"messages":[]}
+```
