@@ -182,7 +182,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 	var posts []Post
 	commentPostIDs := make([]int, 0, postsPerPage)
 	for _, p := range results {
-		if allComments {
+		if allComments && p.CommentCount > 0 {
 			query := "SELECT " +
 				"c.id AS `id`," +
 				"c.post_id AS `post_id`," +
@@ -208,7 +208,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 			}
 
 			p.Comments = comments
-		} else {
+		} else if p.CommentCount > 0 {
 			commentPostIDs = append(commentPostIDs, p.ID)
 		}
 
