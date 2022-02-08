@@ -723,7 +723,7 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		log.Print(err)
 		return
 	}
-	writeImage(pid, mime, filedata)
+	writeImage(int(pid), mime, filedata)
 
 	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)
 }
