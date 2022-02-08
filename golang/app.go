@@ -241,7 +241,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 			"u.created_at AS `user.created_at` " +
 			"FROM (SELECT `id`,`post_id`,`user_id`,`comment`,`created_at`, RANK() OVER (PARTITION BY `post_id` ORDER BY `created_at`) AS `r` FROM `comments` WHERE `post_id` IN (" +
 			strings.Join(b, ",") +
-			")) c JOIN `users` u ON c.user_id = u.id WHERE `r` <= 3 ORDER BY c.created_at DESC;"
+			")) c JOIN `users` u ON c.user_id = u.id WHERE `r` <= 3;"
 		comments := make([]Comment, 0)
 		err := db.Select(&comments, query)
 		if err != nil {
