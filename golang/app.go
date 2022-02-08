@@ -180,36 +180,37 @@ func getFlash(w http.ResponseWriter, r *http.Request, key string) string {
 
 func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, error) {
 	var posts []Post
-
+	commentPostIDs := make([]int, 0, postsPerPage)
 	for _, p := range results {
-		query := "SELECT " +
-			"c.id AS `id`," +
-			"c.post_id AS `post_id`," +
-			"c.user_id AS `user_id`," +
-			"c.comment AS `comment`," +
-			"c.created_at AS `created_at`," +
-			"u.id AS `user.id`, " +
-			"u.account_name AS `user.account_name`, " +
-			"u.passhash AS `user.passhash`, " +
-			"u.authority AS `user.authority`, " +
-			"u.del_flg AS `user.del_flg`, " +
-			"u.created_at AS `user.created_at` " +
-			"FROM `comments` c JOIN `users` u ON c.user_id = u.id WHERE c.post_id = ? ORDER BY c.created_at DESC"
-		if !allComments {
-			query += " LIMIT 3"
-		}
-		var comments []Comment
-		err := db.Select(&comments, query, p.ID)
-		if err != nil {
-			return nil, err
-		}
+		if allComments {
+			query := "SELECT " +
+				"c.id AS `id`," +
+				"c.post_id AS `post_id`," +
+				"c.user_id AS `user_id`," +
+				"c.comment AS `comment`," +
+				"c.created_at AS `created_at`," +
+				"u.id AS `user.id`, " +
+				"u.account_name AS `user.account_name`, " +
+				"u.passhash AS `user.passhash`, " +
+				"u.authority AS `user.authority`, " +
+				"u.del_flg AS `user.del_flg`, " +
+				"u.created_at AS `user.created_at` " +
+				"FROM `comments` c JOIN `users` u ON c.user_id = u.id WHERE c.post_id = ? ORDER BY c.created_at DESC"
+			var comments []Comment
+			err := db.Select(&comments, query, p.ID)
+			if err != nil {
+				return nil, err
+			}
 
-		// reverse
-		for i, j := 0, len(comments)-1; i < j; i, j = i+1, j-1 {
-			comments[i], comments[j] = comments[j], comments[i]
-		}
+			// reverse
+			for i, j := 0, len(comments)-1; i < j; i, j = i+1, j-1 {
+				comments[i], comments[j] = comments[j], comments[i]
+			}
 
-		p.Comments = comments
+			p.Comments = comments
+		} else {
+			commentPostIDs = append(commentPostIDs, p.ID)
+		}
 
 		p.CSRFToken = csrfToken
 
@@ -218,6 +219,42 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 		}
 		if len(posts) >= postsPerPage {
 			break
+		}
+	}
+
+	if len(commentPostIDs) > 0 {
+		b := make([]string, len(commentPostIDs))
+		for i, v := range commentPostIDs {
+			b[i] = strconv.Itoa(v)
+		}
+		query := "SELECT " +
+			"c.id AS `id`, " +
+			"c.post_id AS `post_id`, " +
+			"c.user_id AS `user_id`, " +
+			"c.comment AS `comment`, " +
+			"c.created_at AS `created_at`, " +
+			"u.id AS `user.id`, " +
+			"u.account_name AS `user.account_name`, " +
+			"u.passhash AS `user.passhash`, " +
+			"u.authority AS `user.authority`, " +
+			"u.del_flg AS `user.del_flg`, " +
+			"u.created_at AS `user.created_at` " +
+			"FROM (SELECT `id`,`post_id`,`user_id`,`comment`,`created_at`, RANK() OVER (PARTITION BY `post_id` ORDER BY `created_at`) AS `r` FROM `comments` WHERE `post_id` IN (" +
+			strings.Join(b, ",") +
+			")) c JOIN `users` u ON c.user_id = u.id WHERE `r` <= 3 ORDER BY c.created_at DESC;"
+		comments := make([]Comment, 0)
+		err := db.Select(&comments, query)
+		if err != nil {
+			return nil, err
+		}
+
+		for i := range comments {
+			i = len(comments) - 1 - i
+			for k := range posts {
+				if posts[k].ID == comments[i].PostID {
+					posts[k].Comments = append(posts[k].Comments, comments[i])
+				}
+			}
 		}
 	}
 
