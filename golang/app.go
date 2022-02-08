@@ -613,7 +613,7 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 		"u.authority AS `user.authority`, "+
 		"u.del_flg AS `user.del_flg`, "+
 		"u.created_at AS `user.created_at` "+
-		"FROM `posts` p FORCE INDEX (posts_user_idx) JOIN `users` u ON p.user_id = u.id WHERE p.id = ? AND u.del_flg = 0 LIMIT ?", pid, postsPerPage)
+		"FROM `posts` p FORCE INDEX (PRIMARY) JOIN `users` u ON p.user_id = u.id WHERE p.id = ? AND u.del_flg = 0 LIMIT ?", pid, postsPerPage)
 	if err != nil {
 		log.Print(err)
 		return
