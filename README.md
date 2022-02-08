@@ -272,3 +272,11 @@ Query OK, 0 rows affected (2.40 sec)
 Records: 0  Duplicates: 0  Warnings: 0
 ```
 
+score
+
+```
+{"pass":true,"score":85899,"success":82084,"fail":0,"messages":[]}
+{"pass":true,"score":89106,"success":85166,"fail":0,"messages":[]}
+{"pass":true,"score":94567,"success":90438,"fail":0,"messages":[]}
+```
+
