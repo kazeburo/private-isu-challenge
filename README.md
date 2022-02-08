@@ -321,3 +321,13 @@ score
 {"pass":true,"score":133864,"success":126304,"fail":0,"messages":[]}
 {"pass":true,"score":129888,"success":122383,"fail":0,"messages":[]}
 ```
+
+## window関数でN+1解消
+
+```
+{"pass":true,"score":181792,"success":169672,"fail":0,"messages":[]}
+{"pass":true,"score":185707,"success":174122,"fail":0,"messages":[]}
+{"pass":true,"score":169360,"success":157604,"fail":0,"messages":[]}
+```
+
+
