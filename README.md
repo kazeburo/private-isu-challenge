@@ -280,3 +280,39 @@ score
 {"pass":true,"score":94567,"success":90438,"fail":0,"messages":[]}
 ```
 
+## STRAIGHT_JOIN => FORCE INDEX
+
+一部straigt_joinでは解決できず
+
+```
+{"pass":true,"score":121775,"success":115740,"fail":0,"messages":[]}
+{"pass":true,"score":123021,"success":117054,"fail":0,"messages":[]}
+{"pass":true,"score":125152,"success":118955,"fail":0,"messages":[]}
+```
+
+## countコラム追加。コメントカウントのN+1解消
+
+```
+mysql> ALTER TABLE posts ADD comment_count INT NOT NULL DEFAULT 0;
+Query OK, 0 rows affected (0.18 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+
+mysql> UPDATE posts SET posts.comment_count = (SELECT COUNT(id) FROM comments WHERE comments.post_id = posts.id);
+Query OK, 10045 rows affected (0.24 sec)
+Rows matched: 10211  Changed: 10045  Warnings: 0
+
+mysql> DELIMITER $$
+mysql> CREATE
+    -> TRIGGER insert_comments
+    -> AFTER UPDATE
+    -> ON comments
+    -> FOR EACH ROW
+    -> BEGIN
+    -> UPDATE post SET comment_count = comment_count + 1 WHERE id = NEW.post_id;
+    -> END $$
+Query OK, 0 rows affected (0.00 sec)
+
+mysql> DELIMITER ;
+```
+
+

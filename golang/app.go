@@ -57,7 +57,7 @@ type Post struct {
 	Body         string    `db:"body"`
 	Mime         string    `db:"mime"`
 	CreatedAt    time.Time `db:"created_at"`
-	CommentCount int
+	CommentCount int       `db:"comment_count"`
 	Comments     []Comment
 	User         User
 	CSRFToken    string
@@ -182,11 +182,6 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 	var posts []Post
 
 	for _, p := range results {
-		err := db.Get(&p.CommentCount, "SELECT COUNT(*) AS `count` FROM `comments` WHERE `post_id` = ?", p.ID)
-		if err != nil {
-			return nil, err
-		}
-
 		query := "SELECT " +
 			"c.id AS `id`," +
 			"c.post_id AS `post_id`," +
@@ -204,7 +199,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 			query += " LIMIT 3"
 		}
 		var comments []Comment
-		err = db.Select(&comments, query, p.ID)
+		err := db.Select(&comments, query, p.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -399,6 +394,7 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 		"p.body AS `body`,"+
 		"p.mime AS `mime`,"+
 		"p.created_at AS `created_at`, "+
+		"p.comment_count AS `comment_count`,"+
 		"u.id AS `user.id`, "+
 		"u.account_name AS `user.account_name`, "+
 		"u.passhash AS `user.passhash`, "+
@@ -459,6 +455,7 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 		"p.body AS `body`,"+
 		"p.mime AS `mime`,"+
 		"p.created_at AS `created_at`, "+
+		"p.comment_count AS `comment_count`,"+
 		"u.id AS `user.id`, "+
 		"u.account_name AS `user.account_name`, "+
 		"u.passhash AS `user.passhash`, "+
@@ -559,6 +556,7 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 		"p.body AS `body`,"+
 		"p.mime AS `mime`,"+
 		"p.created_at AS `created_at`, "+
+		"p.comment_count AS `comment_count`,"+
 		"u.id AS `user.id`, "+
 		"u.account_name AS `user.account_name`, "+
 		"u.passhash AS `user.passhash`, "+
@@ -607,6 +605,7 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 		"p.body AS `body`,"+
 		"p.mime AS `mime`,"+
 		"p.created_at AS `created_at`, "+
+		"p.comment_count AS `comment_count`,"+
 		"u.id AS `user.id`, "+
 		"u.account_name AS `user.account_name`, "+
 		"u.passhash AS `user.passhash`, "+
