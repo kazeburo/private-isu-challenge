@@ -248,3 +248,35 @@ score
 {"pass":true,"score":103508,"success":97773,"fail":0,"messages":[]}
 ```
 
+## no store imgdata to DB
+
+```
+mysql> CREATE TABLE `images` (
+    ->   `id` int NOT NULL,
+    ->   `mime` varchar(64) NOT NULL,
+    ->   `imgdata` mediumblob NOT NULL,
+    ->   PRIMARY KEY (`id`)
+    -> ) ENGINE=InnoDB;
+Query OK, 0 rows affected (0.01 sec)
+
+mysql> INSERT INTO `images` (`id`,`mime`,`imgdata`) SELECT `id`,`mime`,`imgdata` FROM `posts`;
+Query OK, 10157 rows affected (1 min 36.56 sec)
+Records: 10157  Duplicates: 0  Warnings: 0
+
+mysql> UPDATE `posts` SET `imgdata` = '';
+Query OK, 10157 rows affected (24.60 sec)
+Rows matched: 10157  Changed: 10157  Warnings: 0
+
+mysql> ALTER TABLE `posts` Engine=InnoDB;
+Query OK, 0 rows affected (2.40 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+```
+
+score
+
+```
+{"pass":true,"score":85899,"success":82084,"fail":0,"messages":[]}
+{"pass":true,"score":89106,"success":85166,"fail":0,"messages":[]}
+{"pass":true,"score":94567,"success":90438,"fail":0,"messages":[]}
+```
+

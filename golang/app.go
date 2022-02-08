@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 
 	//"os/exec"
 	"path"
@@ -85,6 +86,7 @@ func dbInitialize() {
 	sqls := []string{
 		"DELETE FROM users WHERE id > 1000",
 		"DELETE FROM posts WHERE id > 10000",
+		"DELETE FROM images WHERE id > 10000",
 		"DELETE FROM comments WHERE id > 100000",
 		"UPDATE users SET del_flg = 0",
 		"UPDATE users SET del_flg = 1 WHERE id % 50 = 0",
@@ -92,6 +94,13 @@ func dbInitialize() {
 
 	for _, sql := range sqls {
 		db.Exec(sql)
+	}
+
+	files, err := filepath.Glob("/home/isucon/private_isu/webapp/public/image/?????*.*")
+	if err == nil {
+		for _, f := range files {
+			os.Remove(f)
+		}
 	}
 }
 
@@ -701,7 +710,7 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		query,
 		me.ID,
 		mime,
-		filedata,
+		"",
 		r.FormValue("body"),
 	)
 	if err != nil {
@@ -714,6 +723,7 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		log.Print(err)
 		return
 	}
+	writeImage(int(pid), mime, filedata)
 
 	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)
 }
@@ -754,7 +764,7 @@ func getImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	post := Post{}
-	err = db.Get(&post, "SELECT * FROM `posts` WHERE `id` = ?", pid)
+	err = db.Get(&post, "SELECT * FROM `images` WHERE `id` = ?", pid)
 	if err != nil {
 		log.Print(err)
 		return
