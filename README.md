@@ -330,4 +330,10 @@ score
 {"pass":true,"score":169360,"success":157604,"fail":0,"messages":[]}
 ```
 
+## cache template instance
 
+```
+{"pass":true,"score":183153,"success":170872,"fail":0,"messages":[]}
+{"pass":true,"score":184688,"success":173026,"fail":0,"messages":[]}
+{"pass":true,"score":183120,"success":171368,"fail":0,"messages":[]}
+```
