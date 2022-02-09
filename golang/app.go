@@ -190,11 +190,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 				"c.comment AS `comment`," +
 				"c.created_at AS `created_at`," +
 				"u.id AS `user.id`, " +
-				"u.account_name AS `user.account_name`, " +
-				"u.passhash AS `user.passhash`, " +
-				"u.authority AS `user.authority`, " +
-				"u.del_flg AS `user.del_flg`, " +
-				"u.created_at AS `user.created_at` " +
+				"u.account_name AS `user.account_name` " +
 				"FROM `comments` c JOIN `users` u ON c.user_id = u.id WHERE c.post_id = ? ORDER BY c.created_at DESC"
 			var comments []Comment
 			err := db.Select(&comments, query, p.ID)
@@ -234,11 +230,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 			"c.comment AS `comment`, " +
 			"c.created_at AS `created_at`, " +
 			"u.id AS `user.id`, " +
-			"u.account_name AS `user.account_name`, " +
-			"u.passhash AS `user.passhash`, " +
-			"u.authority AS `user.authority`, " +
-			"u.del_flg AS `user.del_flg`, " +
-			"u.created_at AS `user.created_at` " +
+			"u.account_name AS `user.account_name` " +
 			"FROM (SELECT `id`,`post_id`,`user_id`,`comment`,`created_at`, RANK() OVER (PARTITION BY `post_id` ORDER BY `created_at`) AS `r` FROM `comments` WHERE `post_id` IN (" +
 			strings.Join(b, ",") +
 			")) c JOIN `users` u ON c.user_id = u.id WHERE `r` <= 3;"
@@ -433,11 +425,7 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 		"p.created_at AS `created_at`, "+
 		"p.comment_count AS `comment_count`,"+
 		"u.id AS `user.id`, "+
-		"u.account_name AS `user.account_name`, "+
-		"u.passhash AS `user.passhash`, "+
-		"u.authority AS `user.authority`, "+
-		"u.del_flg AS `user.del_flg`, "+
-		"u.created_at AS `user.created_at` "+
+		"u.account_name AS `user.account_name` "+
 		"FROM `posts` p FORCE INDEX (posts_order_idx) JOIN `users` u ON p.user_id = u.id "+
 		"WHERE u.del_flg = 0 "+
 		"ORDER BY p.created_at DESC LIMIT ?", postsPerPage)
@@ -494,11 +482,7 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 		"p.created_at AS `created_at`, "+
 		"p.comment_count AS `comment_count`,"+
 		"u.id AS `user.id`, "+
-		"u.account_name AS `user.account_name`, "+
-		"u.passhash AS `user.passhash`, "+
-		"u.authority AS `user.authority`, "+
-		"u.del_flg AS `user.del_flg`, "+
-		"u.created_at AS `user.created_at` "+
+		"u.account_name AS `user.account_name` "+
 		"FROM `posts` p FORCE INDEX (posts_user_idx) JOIN `users` u ON p.user_id = u.id WHERE p.user_id = ?  AND u.del_flg = 0 ORDER BY p.created_at DESC LIMIT ?", user.ID, postsPerPage)
 	if err != nil {
 		log.Print(err)
@@ -595,11 +579,7 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 		"p.created_at AS `created_at`, "+
 		"p.comment_count AS `comment_count`,"+
 		"u.id AS `user.id`, "+
-		"u.account_name AS `user.account_name`, "+
-		"u.passhash AS `user.passhash`, "+
-		"u.authority AS `user.authority`, "+
-		"u.del_flg AS `user.del_flg`, "+
-		"u.created_at AS `user.created_at` "+
+		"u.account_name AS `user.account_name` "+
 		"FROM `posts` p FORCE INDEX (posts_order_idx) JOIN `users` u ON p.user_id = u.id WHERE p.created_at <= ? AND u.del_flg = 0 ORDER BY p.created_at DESC LIMIT ?", t.Format(ISO8601Format), postsPerPage)
 	if err != nil {
 		log.Print(err)
@@ -644,11 +624,7 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 		"p.created_at AS `created_at`, "+
 		"p.comment_count AS `comment_count`,"+
 		"u.id AS `user.id`, "+
-		"u.account_name AS `user.account_name`, "+
-		"u.passhash AS `user.passhash`, "+
-		"u.authority AS `user.authority`, "+
-		"u.del_flg AS `user.del_flg`, "+
-		"u.created_at AS `user.created_at` "+
+		"u.account_name AS `user.account_name` "+
 		"FROM `posts` p FORCE INDEX (PRIMARY) JOIN `users` u ON p.user_id = u.id WHERE p.id = ? AND u.del_flg = 0 LIMIT ?", pid, postsPerPage)
 	if err != nil {
 		log.Print(err)
