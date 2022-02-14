@@ -428,3 +428,11 @@ server {
 {"pass":true,"score":468520,"success":451011,"fail":0,"messages":[]}
 ```
 
+## Cache User and tune getAccountName
+
+```
+{"pass":true,"score":524554,"success":502282,"fail":0,"messages":[]}
+{"pass":true,"score":521505,"success":499573,"fail":0,"messages":[]}
+{"pass":true,"score":522132,"success":500001,"fail":0,"messages":[]}
+```
+

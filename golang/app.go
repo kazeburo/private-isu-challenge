@@ -28,6 +28,7 @@ import (
 	goji "goji.io"
 	"goji.io/pat"
 	"goji.io/pattern"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -40,6 +41,9 @@ var (
 	templPostsID       *template.Template
 	recentCommentLock  sync.RWMutex
 	recentCommentCache map[int][]Comment
+	userLock           sync.RWMutex
+	userCache          map[int]User
+	accountCache       map[string]int
 	sfGroup            singleflight.Group
 )
 
@@ -80,6 +84,11 @@ type Comment struct {
 	User      User
 }
 
+type PostSummary struct {
+	Count int `db:"c"`
+	Sum   int `db:"s"`
+}
+
 func init() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 }
@@ -107,6 +116,19 @@ func dbInitialize() {
 }
 
 func warmupCache() {
+	users := []User{}
+	db.Select(&users, "SELECT id,account_name,passhash,authority,del_flg FROM users")
+	uc := map[int]User{}
+	accounts := map[string]int{}
+	for _, u := range users {
+		uc[u.ID] = u
+		accounts[u.AccountName] = u.ID
+
+	}
+	userLock.Lock()
+	userCache = uc
+	accountCache = accounts
+	userLock.Unlock()
 
 	posts := []Post{}
 	db.Select(&posts, "SELECT `id` FROM posts")
@@ -137,11 +159,14 @@ func warmupCache() {
 }
 
 func tryLogin(accountName, password string) *User {
-	u := User{}
-	err := db.Get(&u, "SELECT * FROM users WHERE account_name = ? AND del_flg = 0", accountName)
-	if err != nil {
+	userLock.RLock()
+	uid, ok := accountCache[accountName]
+	if !ok {
+		userLock.RUnlock()
 		return nil
 	}
+	u := userCache[uid]
+	userLock.RUnlock()
 
 	if calculatePasshash(u.AccountName, password) == u.Passhash {
 		return &u
@@ -150,9 +175,12 @@ func tryLogin(accountName, password string) *User {
 	}
 }
 
+var vReg1 = regexp.MustCompile(`\A[0-9a-zA-Z_]{3,}\z`)
+var vReg2 = regexp.MustCompile(`\A[0-9a-zA-Z_]{6,}\z`)
+
 func validateUser(accountName, password string) bool {
-	return regexp.MustCompile(`\A[0-9a-zA-Z_]{3,}\z`).MatchString(accountName) &&
-		regexp.MustCompile(`\A[0-9a-zA-Z_]{6,}\z`).MatchString(password)
+	return vReg1.MatchString(accountName) &&
+		vReg2.MatchString(password)
 }
 
 // 今回のGo実装では言語側のエスケープの仕組みが使えないのでOSコマンドインジェクション対策できない
@@ -184,18 +212,14 @@ func getSession(r *http.Request) *simpleCookie {
 
 func getSessionUser(r *http.Request) User {
 	session := getSession(r)
-	uid := session.Values.UserID
-	if uid == 0 {
+	id := session.Values.UserID
+
+	userLock.RLock()
+	u, ok := userCache[id]
+	userLock.RUnlock()
+	if !ok {
 		return User{}
 	}
-
-	u := User{}
-
-	err := db.Get(&u, "SELECT * FROM `users` WHERE `id` = ?", uid)
-	if err != nil {
-		return User{}
-	}
-
 	return u
 }
 
@@ -397,8 +421,9 @@ func postRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pw := calculatePasshash(accountName, password)
 	query := "INSERT INTO `users` (`account_name`, `passhash`) VALUES (?,?)"
-	result, err := db.Exec(query, accountName, calculatePasshash(accountName, password))
+	result, err := db.Exec(query, accountName, pw)
 	if err != nil {
 		log.Print(err)
 		return
@@ -410,6 +435,16 @@ func postRegister(w http.ResponseWriter, r *http.Request) {
 		log.Print(err)
 		return
 	}
+
+	userLock.Lock()
+	userCache[int(uid)] = User{
+		ID:          int(uid),
+		AccountName: accountName,
+		Passhash:    pw,
+	}
+	accountCache[accountName] = int(uid)
+	userLock.Unlock()
+
 	session.Values.UserID = int(uid)
 	session.Values.CSRFToken = secureRandomStr(16)
 	session.Save(w, r)
@@ -484,76 +519,74 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 
 func getAccountName(w http.ResponseWriter, r *http.Request) {
 	accountName := pat.Param(r, "accountName")
-	user := User{}
 
-	err := db.Get(&user, "SELECT * FROM `users` WHERE `account_name` = ? AND `del_flg` = 0", accountName)
-	if err != nil {
-		log.Print(err)
+	userLock.RLock()
+	uid, ok := accountCache[accountName]
+	if !ok {
+		userLock.RUnlock()
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	user := userCache[uid]
+	userLock.RUnlock()
 
-	if user.ID == 0 {
+	if user.ID == 0 || user.DelFlg != 0 {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
-	results := []Post{}
+	var eg errgroup.Group
+	var posts []Post
+	token := getCSRFToken(r)
+	eg.Go(func() error {
+		results := []Post{}
+		err := db.Select(&results, "SELECT "+
+			"p.id AS `id`,"+
+			"p.user_id AS `user_id`,"+
+			"p.body AS `body`,"+
+			"p.mime AS `mime`,"+
+			"p.created_at AS `created_at`, "+
+			"p.comment_count AS `comment_count`,"+
+			"u.id AS `user.id`, "+
+			"u.account_name AS `user.account_name` "+
+			"FROM `posts` p FORCE INDEX (posts_user_idx) JOIN `users` u ON p.user_id = u.id WHERE p.user_id = ?  AND u.del_flg = 0 ORDER BY p.created_at DESC LIMIT ?", user.ID, postsPerPage)
+		if err != nil {
+			return err
+		}
 
-	err = db.Select(&results, "SELECT "+
-		"p.id AS `id`,"+
-		"p.user_id AS `user_id`,"+
-		"p.body AS `body`,"+
-		"p.mime AS `mime`,"+
-		"p.created_at AS `created_at`, "+
-		"p.comment_count AS `comment_count`,"+
-		"u.id AS `user.id`, "+
-		"u.account_name AS `user.account_name` "+
-		"FROM `posts` p FORCE INDEX (posts_user_idx) JOIN `users` u ON p.user_id = u.id WHERE p.user_id = ?  AND u.del_flg = 0 ORDER BY p.created_at DESC LIMIT ?", user.ID, postsPerPage)
-	if err != nil {
-		log.Print(err)
-		return
-	}
-
-	posts, err := makePosts(results, getCSRFToken(r), false)
-	if err != nil {
-		log.Print(err)
-		return
-	}
+		posts, err = makePosts(results, token, false)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 
 	commentCount := 0
-	err = db.Get(&commentCount, "SELECT COUNT(*) AS count FROM `comments` WHERE `user_id` = ?", user.ID)
-	if err != nil {
-		log.Print(err)
-		return
-	}
-
-	postIDs := []int{}
-	err = db.Select(&postIDs, "SELECT `id` FROM `posts` WHERE `user_id` = ?", user.ID)
-	if err != nil {
-		log.Print(err)
-		return
-	}
-	postCount := len(postIDs)
+	eg.Go(func() error {
+		err := db.Get(&commentCount, "SELECT COUNT(*) AS count FROM `comments` WHERE `user_id` = ?", user.ID)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 
 	commentedCount := 0
-	if postCount > 0 {
-		s := []string{}
-		for range postIDs {
-			s = append(s, "?")
-		}
-		placeholder := strings.Join(s, ", ")
-
-		// convert []int -> []interface{}
-		args := make([]interface{}, len(postIDs))
-		for i, v := range postIDs {
-			args[i] = v
-		}
-
-		err = db.Get(&commentedCount, "SELECT COUNT(*) AS count FROM `comments` WHERE `post_id` IN ("+placeholder+")", args...)
+	postCount := 0
+	eg.Go(func() error {
+		res := PostSummary{}
+		err := db.Get(&res, "SELECT count(`id`) as c,IFNULL(sum(`comment_count`),0) as s FROM `posts` WHERE `user_id` = ?", user.ID)
 		if err != nil {
-			log.Print(err)
-			return
+			return err
 		}
+		postCount = res.Count
+		commentedCount = res.Sum
+		return nil
+	})
+
+	if err := eg.Wait(); err != nil {
+		log.Print(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
 	me := getSessionUser(r)
@@ -905,7 +938,14 @@ func postAdminBanned(w http.ResponseWriter, r *http.Request) {
 	for _, id := range r.Form["uid[]"] {
 		db.Exec(query, 1, id)
 	}
-
+	userLock.Lock()
+	for _, id := range r.Form["uid[]"] {
+		i, _ := strconv.Atoi(id)
+		u := userCache[i]
+		u.DelFlg = 1
+		userCache[i] = u
+	}
+	userLock.Unlock()
 	http.Redirect(w, r, "/admin/banned", http.StatusFound)
 }
 
