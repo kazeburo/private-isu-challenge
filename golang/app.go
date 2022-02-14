@@ -29,6 +29,7 @@ import (
 	goji "goji.io"
 	"goji.io/pat"
 	"goji.io/pattern"
+	"golang.org/x/sync/singleflight"
 )
 
 var (
@@ -41,6 +42,7 @@ var (
 	templPostsID       *template.Template
 	recentCommentLock  sync.RWMutex
 	recentCommentCache map[int][]Comment
+	sfGroup            singleflight.Group
 )
 
 const (
@@ -124,10 +126,9 @@ func warmupCache() {
 		"c.post_id AS `post_id`," +
 		"c.user_id AS `user_id`," +
 		"c.comment AS `comment`," +
-		"c.created_at AS `created_at`," +
 		"u.id AS `user.id`, " +
 		"u.account_name AS `user.account_name` " +
-		"FROM (SELECT `id`,`post_id`,`user_id`,`comment`,`created_at`, RANK() OVER (PARTITION BY `post_id` ORDER BY `created_at`) AS `r` FROM `comments`) AS c JOIN `users` u ON c.user_id = u.id WHERE `r` <= 3 ORDER BY created_at DESC"
+		"FROM (SELECT `id`,`post_id`,`user_id`,`comment`,`created_at`, RANK() OVER (PARTITION BY `post_id` ORDER BY `created_at`) AS `r` FROM `comments`) AS c JOIN `users` u ON c.user_id = u.id WHERE `r` <= 3 ORDER BY c.created_at DESC"
 
 	db.Select(&comments, query)
 	for i := range comments {
@@ -253,7 +254,6 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 			"c.post_id AS `post_id`," +
 			"c.user_id AS `user_id`," +
 			"c.comment AS `comment`," +
-			"c.created_at AS `created_at`," +
 			"u.id AS `user.id`, " +
 			"u.account_name AS `user.account_name` " +
 			"FROM `comments` c JOIN `users` u ON c.user_id = u.id " +
@@ -436,34 +436,54 @@ func getLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
+func getSFIndex(token string) ([]Post, error) {
+	v, err, _ := sfGroup.Do("getIndex", func() (interface{}, error) {
+		results := []Post{}
+
+		err := db.Select(&results, "SELECT "+
+			"p.id AS `id`,"+
+			"p.user_id AS `user_id`,"+
+			"p.body AS `body`,"+
+			"p.mime AS `mime`,"+
+			"p.created_at AS `created_at`, "+
+			"p.comment_count AS `comment_count`,"+
+			"u.id AS `user.id`, "+
+			"u.account_name AS `user.account_name` "+
+			"FROM `posts` p FORCE INDEX (posts_order_idx) JOIN `users` u ON p.user_id = u.id "+
+			"WHERE u.del_flg = 0 "+
+			"ORDER BY p.created_at DESC LIMIT ?", postsPerPage)
+		if err != nil {
+			log.Print(err)
+			return nil, err
+		}
+
+		posts, err := makePosts(results, "[[getCSRFToken]]", false)
+		if err != nil {
+			log.Print(err)
+			return nil, err
+		}
+		return posts, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	ps, ok := v.([]Post)
+	if !ok {
+		return nil, fmt.Errorf("something wrong in sfindex")
+	}
+	for _, p := range ps {
+		p.CSRFToken = token
+	}
+	return ps, nil
+}
+
 func getIndex(w http.ResponseWriter, r *http.Request) {
 	me := getSessionUser(r)
-
-	results := []Post{}
-
-	err := db.Select(&results, "SELECT "+
-		"p.id AS `id`,"+
-		"p.user_id AS `user_id`,"+
-		"p.body AS `body`,"+
-		"p.mime AS `mime`,"+
-		"p.created_at AS `created_at`, "+
-		"p.comment_count AS `comment_count`,"+
-		"u.id AS `user.id`, "+
-		"u.account_name AS `user.account_name` "+
-		"FROM `posts` p FORCE INDEX (posts_order_idx) JOIN `users` u ON p.user_id = u.id "+
-		"WHERE u.del_flg = 0 "+
-		"ORDER BY p.created_at DESC LIMIT ?", postsPerPage)
+	posts, err := getSFIndex(getCSRFToken(r))
 	if err != nil {
 		log.Print(err)
 		return
 	}
-
-	posts, err := makePosts(results, getCSRFToken(r), false)
-	if err != nil {
-		log.Print(err)
-		return
-	}
-
 	templIndex.Execute(w, struct {
 		Posts     []Post
 		Me        User
