@@ -355,3 +355,15 @@ score
 {"pass":true,"score":386678,"success":372111,"fail":0,"messages":[]}
 {"pass":true,"score":387717,"success":373109,"fail":0,"messages":[]}
 ```
+
+## cache index
+
+using singleflight
+
+```
+{"pass":true,"score":462445,"success":445206,"fail":0,"messages":[]}
+{"pass":true,"score":421277,"success":405654,"fail":0,"messages":[]}
+{"pass":true,"score":464326,"success":447450,"fail":0,"messages":[]}
+```
+
+
