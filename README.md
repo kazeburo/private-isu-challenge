@@ -374,3 +374,57 @@ using singleflight
 {"pass":true,"score":484997,"success":464795,"fail":0,"messages":[]}
 ```
 
+## tune nginx.conf
+
+
+etag off
+access_log off
+
+```
+keepalive_requests 10000;
+
+upstream app {
+  server localhost:8080;
+  keepalive 100;
+  keepalive_requests 10000;
+}
+
+server {
+  listen 80;
+
+  client_max_body_size 10m;
+  root /home/isucon/private_isu/webapp/public/;
+  access_log off;
+
+  location /css/ {
+    root /home/isucon/private_isu/webapp/public/;
+    expires 1d;
+    etag off;
+  }
+
+  location /js/ {
+    root /home/isucon/private_isu/webapp/public/;
+    expires 1d;
+    etag off;
+  }
+
+  location /image/ {
+    root /home/isucon/private_isu/webapp/public/;
+    try_files $uri $uri/ @app;
+    expires 1d;
+    etag off;
+  }
+
+  location /favicon.ico {
+    root /home/isucon/private_isu/webapp/public/;
+    expires 1d;
+    etag off;
+  }
+```
+
+```
+{"pass":true,"score":513284,"success":494301,"fail":0,"messages":[]}
+{"pass":true,"score":509519,"success":490768,"fail":0,"messages":[]}
+{"pass":true,"score":468520,"success":451011,"fail":0,"messages":[]}
+```
+
