@@ -127,8 +127,8 @@ func warmupCache() {
 		"c.created_at AS `created_at`," +
 		"u.id AS `user.id`, " +
 		"u.account_name AS `user.account_name` " +
-		"FROM `comments` c JOIN `users` u ON c.user_id = u.id " +
-		"ORDER BY c.created_at DESC"
+		"FROM (SELECT `id`,`post_id`,`user_id`,`comment`,`created_at`, RANK() OVER (PARTITION BY `post_id` ORDER BY `created_at`) AS `r` FROM `comments`) AS c JOIN `users` u ON c.user_id = u.id WHERE `r` <= 3 ORDER BY created_at DESC"
+
 	db.Select(&comments, query)
 	for i := range comments {
 		i = len(comments) - 1 - i
