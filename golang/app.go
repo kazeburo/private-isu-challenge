@@ -260,7 +260,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 			"WHERE c.post_id IN (" +
 			strings.Join(b, ",") +
 			") ORDER BY c.created_at DESC"
-		comments := make([]Comment, 0)
+		comments := make([]Comment, 0, totalComment+5)
 		err := db.Select(&comments, query)
 		if err != nil {
 			return nil, err

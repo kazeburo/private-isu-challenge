@@ -337,3 +337,11 @@ score
 {"pass":true,"score":184688,"success":173026,"fail":0,"messages":[]}
 {"pass":true,"score":183120,"success":171368,"fail":0,"messages":[]}
 ```
+
+## cache recent comment
+
+```
+{"pass":true,"score":185196,"success":172629,"fail":0,"messages":[]}
+{"pass":true,"score":199426,"success":185801,"fail":0,"messages":[]}
+{"pass":true,"score":192533,"success":178806,"fail":0,"messages":[]}
+```
