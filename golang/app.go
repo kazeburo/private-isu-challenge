@@ -40,6 +40,9 @@ var (
 	templPostsID       *template.Template
 	recentCommentLock  sync.RWMutex
 	recentCommentCache map[int][]Comment
+	userLock           sync.RWMutex
+	userCache          map[int]User
+	accountCache       map[string]int
 	sfGroup            singleflight.Group
 )
 
@@ -107,6 +110,19 @@ func dbInitialize() {
 }
 
 func warmupCache() {
+	users := []User{}
+	db.Select(&users, "SELECT id,account_name,passhash,authority,del_flg FROM users")
+	uc := map[int]User{}
+	accounts := map[string]int{}
+	for _, u := range users {
+		uc[u.ID] = u
+		accounts[u.AccountName] = u.ID
+
+	}
+	userLock.Lock()
+	userCache = uc
+	accountCache = accounts
+	userLock.Unlock()
 
 	posts := []Post{}
 	db.Select(&posts, "SELECT `id` FROM posts")
@@ -137,11 +153,14 @@ func warmupCache() {
 }
 
 func tryLogin(accountName, password string) *User {
-	u := User{}
-	err := db.Get(&u, "SELECT * FROM users WHERE account_name = ? AND del_flg = 0", accountName)
-	if err != nil {
+	userLock.RLock()
+	uid, ok := accountCache[accountName]
+	if !ok {
+		userLock.RUnlock()
 		return nil
 	}
+	u := userCache[uid]
+	userLock.RUnlock()
 
 	if calculatePasshash(u.AccountName, password) == u.Passhash {
 		return &u
@@ -150,9 +169,12 @@ func tryLogin(accountName, password string) *User {
 	}
 }
 
+var vReg1 = regexp.MustCompile(`\A[0-9a-zA-Z_]{3,}\z`)
+var vReg2 = regexp.MustCompile(`\A[0-9a-zA-Z_]{6,}\z`)
+
 func validateUser(accountName, password string) bool {
-	return regexp.MustCompile(`\A[0-9a-zA-Z_]{3,}\z`).MatchString(accountName) &&
-		regexp.MustCompile(`\A[0-9a-zA-Z_]{6,}\z`).MatchString(password)
+	return vReg1.MatchString(accountName) &&
+		vReg2.MatchString(password)
 }
 
 // 今回のGo実装では言語側のエスケープの仕組みが使えないのでOSコマンドインジェクション対策できない
@@ -184,18 +206,14 @@ func getSession(r *http.Request) *simpleCookie {
 
 func getSessionUser(r *http.Request) User {
 	session := getSession(r)
-	uid := session.Values.UserID
-	if uid == 0 {
+	id := session.Values.UserID
+
+	userLock.RLock()
+	u, ok := userCache[id]
+	userLock.RUnlock()
+	if !ok {
 		return User{}
 	}
-
-	u := User{}
-
-	err := db.Get(&u, "SELECT * FROM `users` WHERE `id` = ?", uid)
-	if err != nil {
-		return User{}
-	}
-
 	return u
 }
 
@@ -397,8 +415,9 @@ func postRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pw := calculatePasshash(accountName, password)
 	query := "INSERT INTO `users` (`account_name`, `passhash`) VALUES (?,?)"
-	result, err := db.Exec(query, accountName, calculatePasshash(accountName, password))
+	result, err := db.Exec(query, accountName, pw)
 	if err != nil {
 		log.Print(err)
 		return
@@ -410,6 +429,16 @@ func postRegister(w http.ResponseWriter, r *http.Request) {
 		log.Print(err)
 		return
 	}
+
+	userLock.Lock()
+	userCache[int(uid)] = User{
+		ID:          int(uid),
+		AccountName: accountName,
+		Passhash:    pw,
+	}
+	accountCache[accountName] = int(uid)
+	userLock.Unlock()
+
 	session.Values.UserID = int(uid)
 	session.Values.CSRFToken = secureRandomStr(16)
 	session.Save(w, r)
@@ -484,22 +513,25 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 
 func getAccountName(w http.ResponseWriter, r *http.Request) {
 	accountName := pat.Param(r, "accountName")
-	user := User{}
 
-	err := db.Get(&user, "SELECT * FROM `users` WHERE `account_name` = ? AND `del_flg` = 0", accountName)
-	if err != nil {
-		log.Print(err)
+	userLock.RLock()
+	uid, ok := accountCache[accountName]
+	if !ok {
+		userLock.RUnlock()
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	user := userCache[uid]
+	userLock.RUnlock()
 
-	if user.ID == 0 {
+	if user.ID == 0 || user.DelFlg != 0 {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
 	results := []Post{}
 
-	err = db.Select(&results, "SELECT "+
+	err := db.Select(&results, "SELECT "+
 		"p.id AS `id`,"+
 		"p.user_id AS `user_id`,"+
 		"p.body AS `body`,"+
@@ -905,7 +937,14 @@ func postAdminBanned(w http.ResponseWriter, r *http.Request) {
 	for _, id := range r.Form["uid[]"] {
 		db.Exec(query, 1, id)
 	}
-
+	userLock.Lock()
+	for _, id := range r.Form["uid[]"] {
+		i, _ := strconv.Atoi(id)
+		u := userCache[i]
+		u.DelFlg = 1
+		userCache[i] = u
+	}
+	userLock.Unlock()
 	http.Redirect(w, r, "/admin/banned", http.StatusFound)
 }
 
