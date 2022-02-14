@@ -127,7 +127,8 @@ func warmupCache() {
 		"c.created_at AS `created_at`," +
 		"u.id AS `user.id`, " +
 		"u.account_name AS `user.account_name` " +
-		"FROM `comments` c JOIN `users` u ON c.user_id = u.id ORDER BY c.created_at DESC"
+		"FROM `comments` c JOIN `users` u ON c.user_id = u.id " +
+		"ORDER BY c.created_at DESC"
 	db.Select(&comments, query)
 	for i := range comments {
 		i = len(comments) - 1 - i
@@ -230,32 +231,6 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 			p.Comments = make([]Comment, 0, p.CommentCount)
 			commentPostIDs = append(commentPostIDs, p.ID)
 			totalComment += p.CommentCount
-		}
-
-		if allComments && p.CommentCount > 0 {
-			query := "SELECT " +
-				"c.id AS `id`," +
-				"c.post_id AS `post_id`," +
-				"c.user_id AS `user_id`," +
-				"c.comment AS `comment`," +
-				"c.created_at AS `created_at`," +
-				"u.id AS `user.id`, " +
-				"u.account_name AS `user.account_name` " +
-				"FROM `comments` c JOIN `users` u ON c.user_id = u.id WHERE c.post_id = ? ORDER BY c.created_at DESC"
-			var comments []Comment
-			err := db.Select(&comments, query, p.ID)
-			if err != nil {
-				return nil, err
-			}
-
-			// reverse
-			for i, j := 0, len(comments)-1; i < j; i, j = i+1, j-1 {
-				comments[i], comments[j] = comments[j], comments[i]
-			}
-
-			p.Comments = comments
-		} else if p.CommentCount > 0 {
-			commentPostIDs = append(commentPostIDs, p.ID)
 		}
 
 		p.CSRFToken = csrfToken
