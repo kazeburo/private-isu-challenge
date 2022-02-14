@@ -28,6 +28,7 @@ import (
 	goji "goji.io"
 	"goji.io/pat"
 	"goji.io/pattern"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -81,6 +82,11 @@ type Comment struct {
 	Comment   string    `db:"comment"`
 	CreatedAt time.Time `db:"created_at"`
 	User      User
+}
+
+type PostSummary struct {
+	Count int `db:"c"`
+	Sum   int `db:"s"`
 }
 
 func init() {
@@ -529,63 +535,58 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := []Post{}
+	var eg errgroup.Group
+	var posts []Post
+	token := getCSRFToken(r)
+	eg.Go(func() error {
+		results := []Post{}
+		err := db.Select(&results, "SELECT "+
+			"p.id AS `id`,"+
+			"p.user_id AS `user_id`,"+
+			"p.body AS `body`,"+
+			"p.mime AS `mime`,"+
+			"p.created_at AS `created_at`, "+
+			"p.comment_count AS `comment_count`,"+
+			"u.id AS `user.id`, "+
+			"u.account_name AS `user.account_name` "+
+			"FROM `posts` p FORCE INDEX (posts_user_idx) JOIN `users` u ON p.user_id = u.id WHERE p.user_id = ?  AND u.del_flg = 0 ORDER BY p.created_at DESC LIMIT ?", user.ID, postsPerPage)
+		if err != nil {
+			return err
+		}
 
-	err := db.Select(&results, "SELECT "+
-		"p.id AS `id`,"+
-		"p.user_id AS `user_id`,"+
-		"p.body AS `body`,"+
-		"p.mime AS `mime`,"+
-		"p.created_at AS `created_at`, "+
-		"p.comment_count AS `comment_count`,"+
-		"u.id AS `user.id`, "+
-		"u.account_name AS `user.account_name` "+
-		"FROM `posts` p FORCE INDEX (posts_user_idx) JOIN `users` u ON p.user_id = u.id WHERE p.user_id = ?  AND u.del_flg = 0 ORDER BY p.created_at DESC LIMIT ?", user.ID, postsPerPage)
-	if err != nil {
-		log.Print(err)
-		return
-	}
-
-	posts, err := makePosts(results, getCSRFToken(r), false)
-	if err != nil {
-		log.Print(err)
-		return
-	}
+		posts, err = makePosts(results, token, false)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 
 	commentCount := 0
-	err = db.Get(&commentCount, "SELECT COUNT(*) AS count FROM `comments` WHERE `user_id` = ?", user.ID)
-	if err != nil {
-		log.Print(err)
-		return
-	}
-
-	postIDs := []int{}
-	err = db.Select(&postIDs, "SELECT `id` FROM `posts` WHERE `user_id` = ?", user.ID)
-	if err != nil {
-		log.Print(err)
-		return
-	}
-	postCount := len(postIDs)
+	eg.Go(func() error {
+		err := db.Get(&commentCount, "SELECT COUNT(*) AS count FROM `comments` WHERE `user_id` = ?", user.ID)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 
 	commentedCount := 0
-	if postCount > 0 {
-		s := []string{}
-		for range postIDs {
-			s = append(s, "?")
-		}
-		placeholder := strings.Join(s, ", ")
-
-		// convert []int -> []interface{}
-		args := make([]interface{}, len(postIDs))
-		for i, v := range postIDs {
-			args[i] = v
-		}
-
-		err = db.Get(&commentedCount, "SELECT COUNT(*) AS count FROM `comments` WHERE `post_id` IN ("+placeholder+")", args...)
+	postCount := 0
+	eg.Go(func() error {
+		res := PostSummary{}
+		err := db.Get(&res, "SELECT count(`id`) as c,IFNULL(sum(`comment_count`),0) as s FROM `posts` WHERE `user_id` = ?", user.ID)
 		if err != nil {
-			log.Print(err)
-			return
+			return err
 		}
+		postCount = res.Count
+		commentedCount = res.Sum
+		return nil
+	})
+
+	if err := eg.Wait(); err != nil {
+		log.Print(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
 	me := getSessionUser(r)
