@@ -337,3 +337,13 @@ score
 {"pass":true,"score":184688,"success":173026,"fail":0,"messages":[]}
 {"pass":true,"score":183120,"success":171368,"fail":0,"messages":[]}
 ```
+
+## 1Gbps
+
+間のNICが100Mbpsだということに気づいた。1Gbpsに変更
+
+```
+{"pass":true,"score":386446,"success":371974,"fail":0,"messages":[]}
+{"pass":true,"score":386678,"success":372111,"fail":0,"messages":[]}
+{"pass":true,"score":387717,"success":373109,"fail":0,"messages":[]}
+```
