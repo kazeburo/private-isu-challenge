@@ -479,7 +479,8 @@ func getSFIndex(token string) ([]Post, error) {
 
 func getIndex(w http.ResponseWriter, r *http.Request) {
 	me := getSessionUser(r)
-	posts, err := getSFIndex(getCSRFToken(r))
+	token := getCSRFToken(r)
+	posts, err := getSFIndex(token)
 	if err != nil {
 		log.Print(err)
 		return
@@ -489,7 +490,7 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 		Me        User
 		CSRFToken string
 		Flash     string
-	}{posts, me, getCSRFToken(r), getFlash(w, r, "notice")})
+	}{posts, me, token, getFlash(w, r, "notice")})
 }
 
 func getAccountName(w http.ResponseWriter, r *http.Request) {
