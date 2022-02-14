@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 
 	//"os/exec"
 	"path"
@@ -31,8 +32,15 @@ import (
 )
 
 var (
-	db    *sqlx.DB
-	store *gsm.MemcacheStore
+	db                 *sqlx.DB
+	store              *gsm.MemcacheStore
+	templRegister      *template.Template
+	templIndex         *template.Template
+	templUser          *template.Template
+	templPosts         *template.Template
+	templPostsID       *template.Template
+	recentCommentLock  sync.RWMutex
+	recentCommentCache map[int][]Comment
 )
 
 const (
@@ -102,6 +110,37 @@ func dbInitialize() {
 			os.Remove(f)
 		}
 	}
+}
+
+func warmupCache() {
+
+	posts := []Post{}
+	db.Select(&posts, "SELECT `id` FROM posts")
+
+	recentCommentMap := map[int][]Comment{}
+	comments := []Comment{}
+	query := "SELECT " +
+		"c.id AS `id`," +
+		"c.post_id AS `post_id`," +
+		"c.user_id AS `user_id`," +
+		"c.comment AS `comment`," +
+		"c.created_at AS `created_at`," +
+		"u.id AS `user.id`, " +
+		"u.account_name AS `user.account_name` " +
+		"FROM (SELECT `id`,`post_id`,`user_id`,`comment`,`created_at`, RANK() OVER (PARTITION BY `post_id` ORDER BY `created_at`) AS `r` FROM `comments`) AS c JOIN `users` u ON c.user_id = u.id WHERE `r` <= 3 ORDER BY created_at DESC"
+
+	db.Select(&comments, query)
+	for i := range comments {
+		i = len(comments) - 1 - i
+		for _, p := range posts {
+			if p.ID == comments[i].PostID {
+				recentCommentMap[p.ID] = append(recentCommentMap[p.ID], comments[i])
+			}
+		}
+	}
+	recentCommentLock.Lock()
+	recentCommentCache = recentCommentMap
+	recentCommentLock.Unlock()
 }
 
 func tryLogin(accountName, password string) *User {
@@ -179,37 +218,19 @@ func getFlash(w http.ResponseWriter, r *http.Request, key string) string {
 }
 
 func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, error) {
-	var posts []Post
+	posts := make([]Post, 0, postsPerPage)
 	commentPostIDs := make([]int, 0, postsPerPage)
+	totalComment := 0
 	for _, p := range results {
-		if allComments && p.CommentCount > 0 {
-			query := "SELECT " +
-				"c.id AS `id`," +
-				"c.post_id AS `post_id`," +
-				"c.user_id AS `user_id`," +
-				"c.comment AS `comment`," +
-				"c.created_at AS `created_at`," +
-				"u.id AS `user.id`, " +
-				"u.account_name AS `user.account_name`, " +
-				"u.passhash AS `user.passhash`, " +
-				"u.authority AS `user.authority`, " +
-				"u.del_flg AS `user.del_flg`, " +
-				"u.created_at AS `user.created_at` " +
-				"FROM `comments` c JOIN `users` u ON c.user_id = u.id WHERE c.post_id = ? ORDER BY c.created_at DESC"
-			var comments []Comment
-			err := db.Select(&comments, query, p.ID)
-			if err != nil {
-				return nil, err
-			}
-
-			// reverse
-			for i, j := 0, len(comments)-1; i < j; i, j = i+1, j-1 {
-				comments[i], comments[j] = comments[j], comments[i]
-			}
-
-			p.Comments = comments
-		} else if p.CommentCount > 0 {
+		if !allComments || p.CommentCount <= 3 {
+			recentCommentLock.RLock()
+			p.Comments = recentCommentCache[p.ID]
+			recentCommentLock.RUnlock()
+		}
+		if p.CommentCount > 3 && allComments {
+			p.Comments = make([]Comment, 0, p.CommentCount)
 			commentPostIDs = append(commentPostIDs, p.ID)
+			totalComment += p.CommentCount
 		}
 
 		p.CSRFToken = csrfToken
@@ -228,21 +249,18 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 			b[i] = strconv.Itoa(v)
 		}
 		query := "SELECT " +
-			"c.id AS `id`, " +
-			"c.post_id AS `post_id`, " +
-			"c.user_id AS `user_id`, " +
-			"c.comment AS `comment`, " +
-			"c.created_at AS `created_at`, " +
+			"c.id AS `id`," +
+			"c.post_id AS `post_id`," +
+			"c.user_id AS `user_id`," +
+			"c.comment AS `comment`," +
+			"c.created_at AS `created_at`," +
 			"u.id AS `user.id`, " +
-			"u.account_name AS `user.account_name`, " +
-			"u.passhash AS `user.passhash`, " +
-			"u.authority AS `user.authority`, " +
-			"u.del_flg AS `user.del_flg`, " +
-			"u.created_at AS `user.created_at` " +
-			"FROM (SELECT `id`,`post_id`,`user_id`,`comment`,`created_at`, RANK() OVER (PARTITION BY `post_id` ORDER BY `created_at`) AS `r` FROM `comments` WHERE `post_id` IN (" +
+			"u.account_name AS `user.account_name` " +
+			"FROM `comments` c JOIN `users` u ON c.user_id = u.id " +
+			"WHERE c.post_id IN (" +
 			strings.Join(b, ",") +
-			")) c JOIN `users` u ON c.user_id = u.id WHERE `r` <= 3;"
-		comments := make([]Comment, 0)
+			") ORDER BY c.created_at DESC"
+		comments := make([]Comment, 0, totalComment+5)
 		err := db.Select(&comments, query)
 		if err != nil {
 			return nil, err
@@ -301,6 +319,7 @@ func getTemplPath(filename string) string {
 
 func getInitialize(w http.ResponseWriter, r *http.Request) {
 	dbInitialize()
+	warmupCache()
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -430,11 +449,7 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 		"p.created_at AS `created_at`, "+
 		"p.comment_count AS `comment_count`,"+
 		"u.id AS `user.id`, "+
-		"u.account_name AS `user.account_name`, "+
-		"u.passhash AS `user.passhash`, "+
-		"u.authority AS `user.authority`, "+
-		"u.del_flg AS `user.del_flg`, "+
-		"u.created_at AS `user.created_at` "+
+		"u.account_name AS `user.account_name` "+
 		"FROM `posts` p FORCE INDEX (posts_order_idx) JOIN `users` u ON p.user_id = u.id "+
 		"WHERE u.del_flg = 0 "+
 		"ORDER BY p.created_at DESC LIMIT ?", postsPerPage)
@@ -482,11 +497,7 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 		"p.created_at AS `created_at`, "+
 		"p.comment_count AS `comment_count`,"+
 		"u.id AS `user.id`, "+
-		"u.account_name AS `user.account_name`, "+
-		"u.passhash AS `user.passhash`, "+
-		"u.authority AS `user.authority`, "+
-		"u.del_flg AS `user.del_flg`, "+
-		"u.created_at AS `user.created_at` "+
+		"u.account_name AS `user.account_name` "+
 		"FROM `posts` p FORCE INDEX (posts_user_idx) JOIN `users` u ON p.user_id = u.id WHERE p.user_id = ?  AND u.del_flg = 0 ORDER BY p.created_at DESC LIMIT ?", user.ID, postsPerPage)
 	if err != nil {
 		log.Print(err)
@@ -574,11 +585,7 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 		"p.created_at AS `created_at`, "+
 		"p.comment_count AS `comment_count`,"+
 		"u.id AS `user.id`, "+
-		"u.account_name AS `user.account_name`, "+
-		"u.passhash AS `user.passhash`, "+
-		"u.authority AS `user.authority`, "+
-		"u.del_flg AS `user.del_flg`, "+
-		"u.created_at AS `user.created_at` "+
+		"u.account_name AS `user.account_name` "+
 		"FROM `posts` p FORCE INDEX (posts_order_idx) JOIN `users` u ON p.user_id = u.id WHERE p.created_at <= ? AND u.del_flg = 0 ORDER BY p.created_at DESC LIMIT ?", t.Format(ISO8601Format), postsPerPage)
 	if err != nil {
 		log.Print(err)
@@ -616,11 +623,7 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 		"p.created_at AS `created_at`, "+
 		"p.comment_count AS `comment_count`,"+
 		"u.id AS `user.id`, "+
-		"u.account_name AS `user.account_name`, "+
-		"u.passhash AS `user.passhash`, "+
-		"u.authority AS `user.authority`, "+
-		"u.del_flg AS `user.del_flg`, "+
-		"u.created_at AS `user.created_at` "+
+		"u.account_name AS `user.account_name` "+
 		"FROM `posts` p FORCE INDEX (PRIMARY) JOIN `users` u ON p.user_id = u.id WHERE p.id = ? AND u.del_flg = 0 LIMIT ?", pid, postsPerPage)
 	if err != nil {
 		log.Print(err)
@@ -805,13 +808,32 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 		log.Print("post_idは整数のみです")
 		return
 	}
-
+	body := r.FormValue("comment")
 	query := "INSERT INTO `comments` (`post_id`, `user_id`, `comment`) VALUES (?,?,?)"
-	_, err = db.Exec(query, postID, me.ID, r.FormValue("comment"))
+	result, err := db.Exec(query, postID, me.ID, body)
 	if err != nil {
 		log.Print(err)
 		return
 	}
+	cid, err := result.LastInsertId()
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	recentCommentLock.Lock()
+	pc := recentCommentCache[postID]
+	pc = append(pc, Comment{
+		ID:      int(cid),
+		PostID:  postID,
+		UserID:  me.ID,
+		Comment: body,
+	})
+	if len(pc) > 3 {
+		pc = pc[1:3]
+	}
+	recentCommentCache[postID] = pc
+	recentCommentLock.Unlock()
 
 	http.Redirect(w, r, fmt.Sprintf("/posts/%d", postID), http.StatusFound)
 }
@@ -902,12 +924,6 @@ func (reg *RegexpPattern) Match(r *http.Request) *http.Request {
 	return nil
 }
 
-var templRegister *template.Template
-var templIndex *template.Template
-var templUser *template.Template
-var templPosts *template.Template
-var templPostsID *template.Template
-
 func main() {
 	fmap := template.FuncMap{
 		"imageURL": imageURL,
@@ -976,6 +992,8 @@ func main() {
 	db.SetMaxOpenConns(8)
 	db.SetMaxIdleConns(8)
 	defer db.Close()
+
+	warmupCache()
 
 	mux := goji.NewMux()
 
