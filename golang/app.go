@@ -4,6 +4,7 @@ import (
 	"context"
 	crand "crypto/rand"
 	"crypto/sha512"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"io"
@@ -21,11 +22,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bradfitz/gomemcache/memcache"
-	gsm "github.com/bradleypeabody/gorilla-sessions-memcache"
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
+	"github.com/mojura/enkodo"
 	goji "goji.io"
 	"goji.io/pat"
 	"goji.io/pattern"
@@ -34,7 +33,6 @@ import (
 
 var (
 	db                 *sqlx.DB
-	store              *gsm.MemcacheStore
 	templRegister      *template.Template
 	templIndex         *template.Template
 	templUser          *template.Template
@@ -83,12 +81,6 @@ type Comment struct {
 }
 
 func init() {
-	memdAddr := os.Getenv("ISUCONP_MEMCACHED_ADDRESS")
-	if memdAddr == "" {
-		memdAddr = "localhost:11211"
-	}
-	memcacheClient := memcache.New(memdAddr)
-	store = gsm.NewMemcacheStore(memcacheClient, "iscogram_", []byte("sendagaya"))
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 }
 
@@ -182,16 +174,18 @@ func calculatePasshash(accountName, password string) string {
 	return digest(password + ":" + calculateSalt(accountName))
 }
 
-func getSession(r *http.Request) *sessions.Session {
-	session, _ := store.Get(r, "isuconp-go.session")
-
+func getSession(r *http.Request) *simpleCookie {
+	session, err := sessionGet(r, "isuconp-go.session")
+	if err != nil {
+		log.Print(err)
+	}
 	return session
 }
 
 func getSessionUser(r *http.Request) User {
 	session := getSession(r)
-	uid, ok := session.Values["user_id"]
-	if !ok || uid == nil {
+	uid := session.Values.UserID
+	if uid == 0 {
 		return User{}
 	}
 
@@ -205,16 +199,16 @@ func getSessionUser(r *http.Request) User {
 	return u
 }
 
-func getFlash(w http.ResponseWriter, r *http.Request, key string) string {
+func getFlash(w http.ResponseWriter, r *http.Request) string {
 	session := getSession(r)
-	value, ok := session.Values[key]
+	notice := session.Values.Notice
 
-	if !ok || value == nil {
+	if notice == "" {
 		return ""
 	} else {
-		delete(session.Values, key)
-		session.Save(r, w)
-		return value.(string)
+		session.Values.Notice = ""
+		session.Save(w, r)
+		return notice
 	}
 }
 
@@ -298,11 +292,7 @@ func isLogin(u User) bool {
 
 func getCSRFToken(r *http.Request) string {
 	session := getSession(r)
-	csrfToken, ok := session.Values["csrf_token"]
-	if !ok {
-		return ""
-	}
-	return csrfToken.(string)
+	return session.Values.CSRFToken
 }
 
 func secureRandomStr(b int) string {
@@ -337,7 +327,7 @@ func getLogin(w http.ResponseWriter, r *http.Request) {
 	).Execute(w, struct {
 		Me    User
 		Flash string
-	}{me, getFlash(w, r, "notice")})
+	}{me, getFlash(w, r)})
 }
 
 func postLogin(w http.ResponseWriter, r *http.Request) {
@@ -350,15 +340,15 @@ func postLogin(w http.ResponseWriter, r *http.Request) {
 
 	if u != nil {
 		session := getSession(r)
-		session.Values["user_id"] = u.ID
-		session.Values["csrf_token"] = secureRandomStr(16)
-		session.Save(r, w)
+		session.Values.UserID = u.ID
+		session.Values.CSRFToken = secureRandomStr(16)
+		session.Save(w, r)
 
 		http.Redirect(w, r, "/", http.StatusFound)
 	} else {
 		session := getSession(r)
-		session.Values["notice"] = "アカウント名かパスワードが間違っています"
-		session.Save(r, w)
+		session.Values.Notice = "アカウント名かパスワードが間違っています"
+		session.Save(w, r)
 
 		http.Redirect(w, r, "/login", http.StatusFound)
 	}
@@ -373,7 +363,7 @@ func getRegister(w http.ResponseWriter, r *http.Request) {
 	templRegister.Execute(w, struct {
 		Me    User
 		Flash string
-	}{User{}, getFlash(w, r, "notice")})
+	}{User{}, getFlash(w, r)})
 }
 
 func postRegister(w http.ResponseWriter, r *http.Request) {
@@ -387,8 +377,8 @@ func postRegister(w http.ResponseWriter, r *http.Request) {
 	validated := validateUser(accountName, password)
 	if !validated {
 		session := getSession(r)
-		session.Values["notice"] = "アカウント名は3文字以上、パスワードは6文字以上である必要があります"
-		session.Save(r, w)
+		session.Values.Notice = "アカウント名は3文字以上、パスワードは6文字以上である必要があります"
+		session.Save(w, r)
 
 		http.Redirect(w, r, "/register", http.StatusFound)
 		return
@@ -400,8 +390,8 @@ func postRegister(w http.ResponseWriter, r *http.Request) {
 
 	if exists == 1 {
 		session := getSession(r)
-		session.Values["notice"] = "アカウント名がすでに使われています"
-		session.Save(r, w)
+		session.Values.Notice = "アカウント名がすでに使われています"
+		session.Save(w, r)
 
 		http.Redirect(w, r, "/register", http.StatusFound)
 		return
@@ -420,18 +410,17 @@ func postRegister(w http.ResponseWriter, r *http.Request) {
 		log.Print(err)
 		return
 	}
-	session.Values["user_id"] = uid
-	session.Values["csrf_token"] = secureRandomStr(16)
-	session.Save(r, w)
+	session.Values.UserID = int(uid)
+	session.Values.CSRFToken = secureRandomStr(16)
+	session.Save(w, r)
 
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 func getLogout(w http.ResponseWriter, r *http.Request) {
 	session := getSession(r)
-	delete(session.Values, "user_id")
-	session.Options = &sessions.Options{MaxAge: -1}
-	session.Save(r, w)
+	session.Values.UserID = 0
+	session.Save(w, r)
 
 	http.Redirect(w, r, "/", http.StatusFound)
 }
@@ -490,7 +479,7 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 		Me        User
 		CSRFToken string
 		Flash     string
-	}{posts, me, token, getFlash(w, r, "notice")})
+	}{posts, me, token, getFlash(w, r)})
 }
 
 func getAccountName(w http.ResponseWriter, r *http.Request) {
@@ -687,8 +676,8 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		session := getSession(r)
-		session.Values["notice"] = "画像が必須です"
-		session.Save(r, w)
+		session.Values.Notice = "画像が必須です"
+		session.Save(w, r)
 
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
@@ -706,8 +695,8 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 			mime = "image/gif"
 		} else {
 			session := getSession(r)
-			session.Values["notice"] = "投稿できる画像形式はjpgとpngとgifだけです"
-			session.Save(r, w)
+			session.Values.Notice = "投稿できる画像形式はjpgとpngとgifだけです"
+			session.Save(w, r)
 
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
@@ -722,8 +711,8 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 
 	if len(filedata) > UploadLimit {
 		session := getSession(r)
-		session.Values["notice"] = "ファイルサイズが大きすぎます"
-		session.Save(r, w)
+		session.Values.Notice = "ファイルサイズが大きすぎます"
+		session.Save(w, r)
 
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
@@ -1036,4 +1025,78 @@ func main() {
 	mux.Handle(pat.Get("/*"), http.FileServer(http.Dir("../public")))
 
 	log.Fatal(http.ListenAndServe(":8080", mux))
+}
+
+type simpleCookie struct {
+	Values sessionData
+	Key    string
+}
+type sessionData struct {
+	UserID    int
+	Notice    string
+	CSRFToken string
+}
+
+func (s *sessionData) MarshalEnkodo(enc *enkodo.Encoder) error {
+	enc.Int(s.UserID)
+	enc.String(s.Notice)
+	enc.String(s.CSRFToken)
+	return nil
+}
+
+func (s *sessionData) UnmarshalEnkodo(dec *enkodo.Decoder) error {
+	var err error
+	if s.UserID, err = dec.Int(); err != nil {
+		return err
+	}
+
+	if s.Notice, err = dec.String(); err != nil {
+		return err
+	}
+
+	if s.CSRFToken, err = dec.String(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *simpleCookie) Save(w http.ResponseWriter, r *http.Request) error {
+	bs, err := enkodo.Marshal(&s.Values)
+	if err != nil {
+		return err
+	}
+	data := base64.StdEncoding.EncodeToString(bs)
+
+	cookie := &http.Cookie{
+		Name:  s.Key,
+		Value: data,
+	}
+	http.SetCookie(w, cookie)
+	return nil
+}
+
+func sessionGet(r *http.Request, key string) (*simpleCookie, error) {
+	s := r.Context().Value(key)
+	if s != nil {
+		return s.(*simpleCookie), nil
+	}
+	var sd sessionData
+	cookie, err := r.Cookie(key)
+	if err == nil {
+		data, err := base64.StdEncoding.DecodeString(cookie.Value)
+		if err != nil {
+			return nil, err
+		}
+		if err := enkodo.Unmarshal(data, &sd); err != nil {
+			return nil, err
+		}
+	}
+	newSession := &simpleCookie{
+		Values: sd,
+		Key:    key,
+	}
+	ctx := context.WithValue(r.Context(), key, newSession)
+	r = r.WithContext(ctx)
+	return newSession, nil
 }

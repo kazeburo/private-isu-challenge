@@ -366,4 +366,11 @@ using singleflight
 {"pass":true,"score":464326,"success":447450,"fail":0,"messages":[]}
 ```
 
+## no memcached cookie
+
+```
+{"pass":true,"score":481488,"success":461570,"fail":0,"messages":[]}
+{"pass":true,"score":481375,"success":461535,"fail":0,"messages":[]}
+{"pass":true,"score":484997,"success":464795,"fail":0,"messages":[]}
+```
 
