@@ -802,10 +802,34 @@ func writeImage(id int, mime string, data []byte) {
 }
 
 func getImage(w http.ResponseWriter, r *http.Request) {
+	if _, ok := r.Header["If-Modified-Since"]; ok {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	ext := pat.Param(r, "ext")
 	pidStr := pat.Param(r, "id")
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	n := "../public/image/" + pidStr + "." + ext
+	_, err = os.Stat(n)
+	if err == nil {
+		switch ext {
+		case "jpg":
+			w.Header().Set("Content-Type", "image/jpeg")
+		case "png":
+			w.Header().Set("Content-Type", "image/png")
+		case "gif":
+			w.Header().Set("Content-Type", "image/gif")
+		}
+		fh, _ := os.Open(n)
+		defer fh.Close()
+		w.Header().Set("Last-Modified", "Mon, 31 May 2021 04:50:49 GMT")
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		io.Copy(w, fh)
 		return
 	}
 
@@ -816,13 +840,13 @@ func getImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ext := pat.Param(r, "ext")
-
 	if ext == "jpg" && post.Mime == "image/jpeg" ||
 		ext == "png" && post.Mime == "image/png" ||
 		ext == "gif" && post.Mime == "image/gif" {
 		writeImage(pid, post.Mime, post.Imgdata)
 		w.Header().Set("Content-Type", post.Mime)
+		w.Header().Set("Last-Modified", "Mon, 31 May 2021 04:50:49 GMT")
+		w.Header().Set("Cache-Control", "public, max-age=300")
 		_, err := w.Write(post.Imgdata)
 		if err != nil {
 			log.Print(err)
@@ -949,6 +973,16 @@ func postAdminBanned(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/banned", http.StatusFound)
 }
 
+func serveStatic(path string) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := r.Header["If-Modified-Since"]; ok {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		http.ServeFile(w, r, path)
+	}
+}
+
 type RegexpPattern struct {
 	regexp *regexp.Regexp
 }
@@ -1062,6 +1096,13 @@ func main() {
 	mux.HandleFunc(pat.Get("/admin/banned"), getAdminBanned)
 	mux.HandleFunc(pat.Post("/admin/banned"), postAdminBanned)
 	mux.HandleFunc(Regexp(regexp.MustCompile(`^/@(?P<accountName>[a-zA-Z]+)$`)), getAccountName)
+
+	mux.HandleFunc(pat.Get("/js/main.js"), serveStatic("../public/js/main.js"))
+	mux.HandleFunc(pat.Get("/js/timeago.min.js"), serveStatic("../public/js/timeago.min.js"))
+	mux.HandleFunc(pat.Get("/img/ajax-loader.gif"), serveStatic("../public/img/ajax-loader.gif"))
+	mux.HandleFunc(pat.Get("/css/style.css"), serveStatic("../public/css/style.css"))
+	mux.HandleFunc(pat.Get("/favicon.ico"), serveStatic("../public/favicon.ico"))
+
 	mux.Handle(pat.Get("/*"), http.FileServer(http.Dir("../public")))
 
 	log.Fatal(http.ListenAndServe(":8080", mux))
