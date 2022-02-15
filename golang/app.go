@@ -1105,7 +1105,7 @@ func main() {
 
 	mux.Handle(pat.Get("/*"), http.FileServer(http.Dir("../public")))
 
-	log.Fatal(http.ListenAndServe(":8080", mux))
+	log.Fatal(http.ListenAndServe(":80", mux))
 }
 
 type simpleCookie struct {
