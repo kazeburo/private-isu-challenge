@@ -436,3 +436,19 @@ server {
 {"pass":true,"score":522132,"success":500001,"fail":0,"messages":[]}
 ```
 
+nginxの負荷が高い
+
+```
+top - 10:12:59 up 10:41,  1 user,  load average: 0.75, 0.16, 0.05
+Tasks:  91 total,   2 running,  89 sleeping,   0 stopped,   0 zombie
+%Cpu(s): 58.9 us, 17.4 sy,  0.0 ni,  9.0 id,  2.7 wa,  0.0 hi, 10.6 si,  1.5 st
+MiB Mem :    981.1 total,    112.7 free,    336.9 used,    531.5 buff/cache
+MiB Swap:   4096.0 total,   3813.2 free,    282.8 used.    497.7 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+   2551 isucon    20   0 1446692  61116   5984 S  93.3   6.1   6:24.91 app
+    470 mysql     20   0 1752684 166576   7428 S  31.7  16.6  17:06.28 mysqld
+   2219 www-data  20   0   56484   4664   2116 S  28.3   0.5   3:48.12 nginx
+   2218 www-data  20   0   56788   4672   2116 S  20.3   0.5   2:52.02 nginx
+```
+
