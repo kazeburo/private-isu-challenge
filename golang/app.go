@@ -979,6 +979,7 @@ func serveStatic(path string) func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
+		w.Header().Set("Cache-Control", "public, max-age=300")
 		http.ServeFile(w, r, path)
 	}
 }
@@ -1103,7 +1104,7 @@ func main() {
 	mux.HandleFunc(pat.Get("/css/style.css"), serveStatic("../public/css/style.css"))
 	mux.HandleFunc(pat.Get("/favicon.ico"), serveStatic("../public/favicon.ico"))
 
-	mux.Handle(pat.Get("/*"), http.FileServer(http.Dir("../public")))
+	// mux.Handle(pat.Get("/*"), http.FileServer(http.Dir("../public")))
 
 	log.Fatal(http.ListenAndServe(":80", mux))
 }
