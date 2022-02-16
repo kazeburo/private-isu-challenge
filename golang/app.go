@@ -815,7 +815,7 @@ func getImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	n := "../public/image/" + pidStr + "." + ext
-	_, err = os.Stat(n)
+	stat, err := os.Stat(n)
 	if err == nil {
 		switch ext {
 		case "jpg":
@@ -829,6 +829,7 @@ func getImage(w http.ResponseWriter, r *http.Request) {
 		defer fh.Close()
 		w.Header().Set("Last-Modified", "Mon, 31 May 2021 04:50:49 GMT")
 		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Header().Set("Content-Length", strconv.FormatInt(stat.Size(), 10))
 		io.Copy(w, fh)
 		return
 	}
