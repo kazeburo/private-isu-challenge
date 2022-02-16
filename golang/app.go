@@ -814,7 +814,7 @@ func getImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	n := "../public/image/" + pidStr + "." + ext
+	n := "/home/isucon/private_isu/webapp/public/image/" + pidStr + "." + ext
 	stat, err := os.Stat(n)
 	if err == nil {
 		switch ext {
@@ -830,7 +830,7 @@ func getImage(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Last-Modified", "Mon, 31 May 2021 04:50:49 GMT")
 		w.Header().Set("Cache-Control", "public, max-age=300")
 		w.Header().Set("Content-Length", strconv.FormatInt(stat.Size(), 10))
-		io.Copy(w, fh)
+		io.CopyN(w, fh, stat.Size())
 		return
 	}
 
