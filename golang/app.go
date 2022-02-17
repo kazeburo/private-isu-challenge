@@ -132,7 +132,7 @@ func dbInitialize() {
 
 func warmupCache() {
 	users := []User{}
-	db.Select(&users, "SELECT id,account_name,passhash,authority,del_flg FROM users")
+	db.Select(&users, "SELECT `id`, `account_name`, `passhash`, `authority`, `del_flg` FROM `users`")
 	uc := map[int]User{}
 	accounts := map[string]int{}
 	for _, u := range users {
@@ -146,7 +146,7 @@ func warmupCache() {
 	userLock.Unlock()
 
 	posts := []Post{}
-	db.Select(&posts, "SELECT `id`, `user_id`, `body`, `mime`, `comment_count`,`created_at` FROM posts")
+	db.Select(&posts, "SELECT `id`, `user_id`, `body`, `mime`, `comment_count`,`created_at` FROM `posts`")
 	postsMap := map[int]Post{}
 	for _, p := range posts {
 		p.Created = p.CreatedAt.Format("2006-01-02T15:04:05-07:00")
@@ -204,13 +204,6 @@ var vReg2 = regexp.MustCompile(`\A[0-9a-zA-Z_]{6,}\z`)
 func validateUser(accountName, password string) bool {
 	return vReg1.MatchString(accountName) &&
 		vReg2.MatchString(password)
-}
-
-// 今回のGo実装では言語側のエスケープの仕組みが使えないのでOSコマンドインジェクション対策できない
-// 取り急ぎPHPのescapeshellarg関数を参考に自前で実装
-// cf: http://jp2.php.net/manual/ja/function.escapeshellarg.php
-func escapeshellarg(arg string) string {
-	return "'" + strings.Replace(arg, "'", "'\\''", -1) + "'"
 }
 
 func digest(src string) string {
@@ -328,19 +321,6 @@ func makePosts(results []int, csrfToken string, allComments bool) ([]Post, error
 	}
 
 	return posts, nil
-}
-
-func imageURL(p Post) string {
-	ext := ""
-	if p.Mime == "image/jpeg" {
-		ext = ".jpg"
-	} else if p.Mime == "image/png" {
-		ext = ".png"
-	} else if p.Mime == "image/gif" {
-		ext = ".gif"
-	}
-
-	return "/image/" + strconv.Itoa(p.ID) + ext
 }
 
 func isLogin(u User) bool {
@@ -566,10 +546,10 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var eg errgroup.Group
-	var posts []Post
+	posts := make([]Post, 0, postsPerPage)
 	token := getCSRFToken(r)
 	eg.Go(func() error {
-		results := make([]int, 0, 25)
+		results := make([]int, 0, relaxPostPerPage)
 		err := db.Select(&results, "SELECT "+
 			"`id` "+
 			"FROM `posts` FORCE INDEX (posts_user_idx) WHERE `user_id` = ? "+
@@ -644,7 +624,7 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := make([]int, 0, 25)
+	results := make([]int, 0, relaxPostPerPage)
 	err = db.Select(&results, "SELECT "+
 		"`id` "+
 		"FROM `posts` FORCE INDEX (posts_order_idx) "+
