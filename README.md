@@ -459,3 +459,13 @@ MiB Swap:   4096.0 total,   3813.2 free,    282.8 used.    497.7 avail Mem
 {"pass":true,"score":544678,"success":521165,"fail":0,"messages":[]}
 {"pass":true,"score":543109,"success":519612,"fail":0,"messages":[]}
 ```
+
+## getLogin template cache
+
+忘れてた
+
+```
+{"pass":true,"score":556188,"success":532511,"fail":0,"messages":[]}
+{"pass":true,"score":532122,"success":509214,"fail":0,"messages":[]}
+{"pass":true,"score":548705,"success":525309,"fail":0,"messages":[]}
+```
