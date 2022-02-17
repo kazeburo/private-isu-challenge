@@ -39,6 +39,7 @@ var (
 	templUser          *template.Template
 	templPosts         *template.Template
 	templPostsID       *template.Template
+	tmplLogin          *template.Template
 	postLock           sync.RWMutex
 	postCache          map[int]Post
 	recentCommentLock  sync.RWMutex
@@ -367,10 +368,7 @@ func getLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	template.Must(template.ParseFiles(
-		getTemplPath("layout.html"),
-		getTemplPath("login.html")),
-	).Execute(w, struct {
+	tmplLogin.Execute(w, struct {
 		Me    User
 		Flash string
 	}{me, getFlash(w, r)})
@@ -1016,6 +1014,10 @@ func main() {
 		getTemplPath("post_id.html"),
 		getTemplPath("post.html"),
 	))
+	tmplLogin = template.Must(template.ParseFiles(
+		getTemplPath("layout.html"),
+		getTemplPath("login.html")),
+	)
 
 	host := os.Getenv("ISUCONP_DB_HOST")
 	if host == "" {
