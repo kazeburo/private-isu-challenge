@@ -445,7 +445,7 @@ func postRegister(c *fiber.Ctx) error {
 	userLock.Lock()
 	userCache[int(uid)] = User{
 		ID:          int(uid),
-		AccountName: accountName,
+		AccountName: CopyString(accountName),
 		Passhash:    pw,
 	}
 	accountCache[accountName] = int(uid)
@@ -738,7 +738,7 @@ func postIndex(c *fiber.Ctx) error {
 		ID:           id,
 		UserID:       me.ID,
 		Mime:         mime,
-		Body:         body,
+		Body:         CopyString(body),
 		CommentCount: 0,
 		CreatedAt:    n,
 		Created:      n.Format("2006-01-02T15:04:05-07:00"),
