@@ -494,3 +494,14 @@ MiB Swap:   4096.0 total,   3760.5 free,    335.5 used.    529.1 avail Mem
   33787 www-data  20   0   56856   4676   2016 R  32.2   0.5   5:33.81 nginx
   33786 www-data  20   0   56796   4616   2016 R  29.9   0.5   4:23.76 nginx   
 ```
+
+## Cache getIndex
+
+singleflightでcacheつくる。必要な時だけcacheをupdate
+
+```
+{"pass":true,"score":650841,"success":608564,"fail":0,"messages":[]}
+{"pass":true,"score":624772,"success":584408,"fail":0,"messages":[]}
+{"pass":true,"score":637138,"success":595814,"fail":0,"messages":[]}
+```
+

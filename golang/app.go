@@ -48,6 +48,8 @@ var (
 	userCache          map[int]User
 	accountCache       map[string]int
 	sfGroup            singleflight.Group
+	indexCache         []byte
+	indexLock          sync.RWMutex
 )
 
 const (
@@ -467,8 +469,8 @@ func getLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-func getSFIndex() ([]byte, error) {
-	v, err, _ := sfGroup.Do("getIndex", func() (interface{}, error) {
+func updateIndex() {
+	sfGroup.Do("getIndex", func() (interface{}, error) {
 		results := make([]int, 0, relaxPostPerPage)
 
 		err := db.Select(&results, "SELECT "+
@@ -487,43 +489,37 @@ func getSFIndex() ([]byte, error) {
 		}
 		var b bytes.Buffer
 		postsHTML(&b, posts)
-		return b.Bytes(), nil
+
+		indexLock.Lock()
+		indexCache = b.Bytes()
+		indexLock.Unlock()
+		return nil, nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	b, ok := v.([]byte)
-	if !ok {
-		return nil, fmt.Errorf("something wrong in sfindex")
-	}
-	return b, nil
 }
 
 func getIndex(w http.ResponseWriter, r *http.Request) {
 	me := getSessionUser(r)
 	token := getCSRFToken(r)
-	ps, err := getSFIndex()
-	if err != nil {
-		log.Print(err)
-		return
-	}
+	bToken := []byte(token)
 
 	b := bytebufferpool.Get()
-	bToken := []byte(token)
 	defer func() {
 		bytebufferpool.Put(b)
 	}()
+
 	i := 0
+	indexLock.RLock()
 	for {
-		k := bytes.Index(ps[i:], []byte("[[getCSRFToken]]"))
+		k := bytes.Index(indexCache[i:], []byte("[[getCSRFToken]]"))
 		if k <= 0 {
-			b.Write(ps[i:])
+			b.Write(indexCache[i:])
 			break
 		}
-		b.Write(ps[i : i+k])
+		b.Write(indexCache[i : i+k])
 		b.Write(bToken)
 		i += k + len("[[getCSRFToken]]")
 	}
+	indexLock.RUnlock()
 	indexHTML(w, b.Bytes(), me, token, getFlash(w, r))
 }
 
@@ -769,6 +765,8 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 	recentCommentLock.Lock()
 	recentCommentCache[id] = []Comment{}
 	recentCommentLock.Unlock()
+
+	updateIndex()
 
 	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)
 }
@@ -1026,6 +1024,7 @@ func main() {
 	defer db.Close()
 
 	warmupCache()
+	updateIndex()
 
 	mux := goji.NewMux()
 
