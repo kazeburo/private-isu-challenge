@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	crand "crypto/rand"
 	"crypto/sha512"
@@ -13,7 +14,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
+	"unsafe"
 
 	//"os/exec"
 	"path"
@@ -25,6 +28,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	"github.com/mojura/enkodo"
+	"github.com/valyala/bytebufferpool"
 	goji "goji.io"
 	"goji.io/pat"
 	"goji.io/pattern"
@@ -35,10 +39,9 @@ import (
 var (
 	db                 *sqlx.DB
 	templRegister      *template.Template
-	templIndex         *template.Template
-	templUser          *template.Template
-	templPosts         *template.Template
-	templPostsID       *template.Template
+	templBanned        *template.Template
+	postLock           sync.RWMutex
+	postCache          map[int]Post
 	recentCommentLock  sync.RWMutex
 	recentCommentCache map[int][]Comment
 	userLock           sync.RWMutex
@@ -48,9 +51,10 @@ var (
 )
 
 const (
-	postsPerPage  = 20
-	ISO8601Format = "2006-01-02T15:04:05-07:00"
-	UploadLimit   = 10 * 1024 * 1024 // 10mb
+	postsPerPage     = 20
+	relaxPostPerPage = 25
+	ISO8601Format    = "2006-01-02T15:04:05-07:00"
+	UploadLimit      = 10 * 1024 * 1024 // 10mb
 )
 
 type User struct {
@@ -69,7 +73,8 @@ type Post struct {
 	Body         string    `db:"body"`
 	Mime         string    `db:"mime"`
 	CreatedAt    time.Time `db:"created_at"`
-	CommentCount int       `db:"comment_count"`
+	Created      string
+	CommentCount int `db:"comment_count"`
 	Comments     []Comment
 	User         User
 	CSRFToken    string
@@ -87,6 +92,16 @@ type Comment struct {
 type PostSummary struct {
 	Count int `db:"c"`
 	Sum   int `db:"s"`
+}
+
+// https://github.com/gofiber/fiber/blob/861e5d21fbdfcf1759a274a3becfa5d9cf9a173c/utils/convert.go#L22
+func UnsafeBytes(s string) (bs []byte) {
+	sh := (*reflect.StringHeader)(unsafe.Pointer(&s))
+	bh := (*reflect.SliceHeader)(unsafe.Pointer(&bs))
+	bh.Data = sh.Data
+	bh.Len = sh.Len
+	bh.Cap = sh.Len
+	return
 }
 
 func init() {
@@ -117,7 +132,7 @@ func dbInitialize() {
 
 func warmupCache() {
 	users := []User{}
-	db.Select(&users, "SELECT id,account_name,passhash,authority,del_flg FROM users")
+	db.Select(&users, "SELECT `id`, `account_name`, `passhash`, `authority`, `del_flg` FROM `users`")
 	uc := map[int]User{}
 	accounts := map[string]int{}
 	for _, u := range users {
@@ -131,7 +146,15 @@ func warmupCache() {
 	userLock.Unlock()
 
 	posts := []Post{}
-	db.Select(&posts, "SELECT `id` FROM posts")
+	db.Select(&posts, "SELECT `id`, `user_id`, `body`, `mime`, `comment_count`,`created_at` FROM `posts`")
+	postsMap := map[int]Post{}
+	for _, p := range posts {
+		p.Created = p.CreatedAt.Format("2006-01-02T15:04:05-07:00")
+		postsMap[p.ID] = p
+	}
+	postLock.Lock()
+	postCache = postsMap
+	postLock.Unlock()
 
 	recentCommentMap := map[int][]Comment{}
 	comments := []Comment{}
@@ -183,13 +206,6 @@ func validateUser(accountName, password string) bool {
 		vReg2.MatchString(password)
 }
 
-// 今回のGo実装では言語側のエスケープの仕組みが使えないのでOSコマンドインジェクション対策できない
-// 取り急ぎPHPのescapeshellarg関数を参考に自前で実装
-// cf: http://jp2.php.net/manual/ja/function.escapeshellarg.php
-func escapeshellarg(arg string) string {
-	return "'" + strings.Replace(arg, "'", "'\\''", -1) + "'"
-}
-
 func digest(src string) string {
 	return fmt.Sprintf("%x", sha512.Sum512([]byte(src)))
 }
@@ -236,11 +252,18 @@ func getFlash(w http.ResponseWriter, r *http.Request) string {
 	}
 }
 
-func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, error) {
+func makePosts(results []int, csrfToken string, allComments bool) ([]Post, error) {
 	posts := make([]Post, 0, postsPerPage)
 	commentPostIDs := make([]int, 0, postsPerPage)
 	totalComment := 0
-	for _, p := range results {
+	for _, i := range results {
+		postLock.RLock()
+		p, ok := postCache[i]
+		postLock.RUnlock()
+		if !ok {
+			continue
+		}
+
 		if !allComments || p.CommentCount <= 3 {
 			recentCommentLock.RLock()
 			p.Comments = recentCommentCache[p.ID]
@@ -253,6 +276,9 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 		}
 
 		p.CSRFToken = csrfToken
+		userLock.RLock()
+		p.User = userCache[p.UserID]
+		userLock.RUnlock()
 
 		if p.User.DelFlg == 0 {
 			posts = append(posts, p)
@@ -297,19 +323,6 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 	return posts, nil
 }
 
-func imageURL(p Post) string {
-	ext := ""
-	if p.Mime == "image/jpeg" {
-		ext = ".jpg"
-	} else if p.Mime == "image/png" {
-		ext = ".png"
-	} else if p.Mime == "image/gif" {
-		ext = ".gif"
-	}
-
-	return "/image/" + strconv.Itoa(p.ID) + ext
-}
-
 func isLogin(u User) bool {
 	return u.ID != 0
 }
@@ -345,13 +358,7 @@ func getLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	template.Must(template.ParseFiles(
-		getTemplPath("layout.html"),
-		getTemplPath("login.html")),
-	).Execute(w, struct {
-		Me    User
-		Flash string
-	}{me, getFlash(w, r)})
+	loginHTML(w, me, getFlash(w, r))
 }
 
 func postLogin(w http.ResponseWriter, r *http.Request) {
@@ -460,22 +467,14 @@ func getLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-func getSFIndex(token string) ([]Post, error) {
+func getSFIndex() ([]byte, error) {
 	v, err, _ := sfGroup.Do("getIndex", func() (interface{}, error) {
-		results := []Post{}
+		results := make([]int, 0, relaxPostPerPage)
 
 		err := db.Select(&results, "SELECT "+
-			"p.id AS `id`,"+
-			"p.user_id AS `user_id`,"+
-			"p.body AS `body`,"+
-			"p.mime AS `mime`,"+
-			"p.created_at AS `created_at`, "+
-			"p.comment_count AS `comment_count`,"+
-			"u.id AS `user.id`, "+
-			"u.account_name AS `user.account_name` "+
-			"FROM `posts` p FORCE INDEX (posts_order_idx) JOIN `users` u ON p.user_id = u.id "+
-			"WHERE u.del_flg = 0 "+
-			"ORDER BY p.created_at DESC LIMIT ?", postsPerPage)
+			"`id` "+
+			"FROM `posts` FORCE INDEX (posts_order_idx) "+
+			"ORDER BY `created_at` DESC LIMIT ?", relaxPostPerPage)
 		if err != nil {
 			log.Print(err)
 			return nil, err
@@ -486,35 +485,46 @@ func getSFIndex(token string) ([]Post, error) {
 			log.Print(err)
 			return nil, err
 		}
-		return posts, nil
+		var b bytes.Buffer
+		postsHTML(&b, posts)
+		return b.Bytes(), nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	ps, ok := v.([]Post)
+	b, ok := v.([]byte)
 	if !ok {
 		return nil, fmt.Errorf("something wrong in sfindex")
 	}
-	for _, p := range ps {
-		p.CSRFToken = token
-	}
-	return ps, nil
+	return b, nil
 }
 
 func getIndex(w http.ResponseWriter, r *http.Request) {
 	me := getSessionUser(r)
 	token := getCSRFToken(r)
-	posts, err := getSFIndex(token)
+	ps, err := getSFIndex()
 	if err != nil {
 		log.Print(err)
 		return
 	}
-	templIndex.Execute(w, struct {
-		Posts     []Post
-		Me        User
-		CSRFToken string
-		Flash     string
-	}{posts, me, token, getFlash(w, r)})
+
+	b := bytebufferpool.Get()
+	bToken := []byte(token)
+	defer func() {
+		bytebufferpool.Put(b)
+	}()
+	i := 0
+	for {
+		k := bytes.Index(ps[i:], []byte("[[getCSRFToken]]"))
+		if k <= 0 {
+			b.Write(ps[i:])
+			break
+		}
+		b.Write(ps[i : i+k])
+		b.Write(bToken)
+		i += k + len("[[getCSRFToken]]")
+	}
+	indexHTML(w, b.Bytes(), me, token, getFlash(w, r))
 }
 
 func getAccountName(w http.ResponseWriter, r *http.Request) {
@@ -536,20 +546,14 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var eg errgroup.Group
-	var posts []Post
+	posts := make([]Post, 0, postsPerPage)
 	token := getCSRFToken(r)
 	eg.Go(func() error {
-		results := []Post{}
+		results := make([]int, 0, relaxPostPerPage)
 		err := db.Select(&results, "SELECT "+
-			"p.id AS `id`,"+
-			"p.user_id AS `user_id`,"+
-			"p.body AS `body`,"+
-			"p.mime AS `mime`,"+
-			"p.created_at AS `created_at`, "+
-			"p.comment_count AS `comment_count`,"+
-			"u.id AS `user.id`, "+
-			"u.account_name AS `user.account_name` "+
-			"FROM `posts` p FORCE INDEX (posts_user_idx) JOIN `users` u ON p.user_id = u.id WHERE p.user_id = ?  AND u.del_flg = 0 ORDER BY p.created_at DESC LIMIT ?", user.ID, postsPerPage)
+			"`id` "+
+			"FROM `posts` FORCE INDEX (posts_user_idx) WHERE `user_id` = ? "+
+			"ORDER BY `created_at` DESC LIMIT ?", user.ID, relaxPostPerPage)
 		if err != nil {
 			return err
 		}
@@ -591,14 +595,15 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 
 	me := getSessionUser(r)
 
-	templUser.Execute(w, struct {
-		Posts          []Post
-		User           User
-		PostCount      int
-		CommentCount   int
-		CommentedCount int
-		Me             User
-	}{posts, user, postCount, commentCount, commentedCount, me})
+	userHTML(
+		w,
+		posts,
+		user,
+		postCount,
+		commentCount,
+		commentedCount,
+		me,
+	)
 }
 
 func getPosts(w http.ResponseWriter, r *http.Request) {
@@ -619,17 +624,11 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := []Post{}
+	results := make([]int, 0, relaxPostPerPage)
 	err = db.Select(&results, "SELECT "+
-		"p.id AS `id`,"+
-		"p.user_id AS `user_id`,"+
-		"p.body AS `body`,"+
-		"p.mime AS `mime`,"+
-		"p.created_at AS `created_at`, "+
-		"p.comment_count AS `comment_count`,"+
-		"u.id AS `user.id`, "+
-		"u.account_name AS `user.account_name` "+
-		"FROM `posts` p FORCE INDEX (posts_order_idx) JOIN `users` u ON p.user_id = u.id WHERE p.created_at <= ? AND u.del_flg = 0 ORDER BY p.created_at DESC LIMIT ?", t.Format(ISO8601Format), postsPerPage)
+		"`id` "+
+		"FROM `posts` FORCE INDEX (posts_order_idx) "+
+		"WHERE `created_at` <= ? ORDER BY `created_at` DESC LIMIT ?", t.Format(ISO8601Format), relaxPostPerPage)
 	if err != nil {
 		log.Print(err)
 		return
@@ -645,8 +644,7 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-
-	templPosts.Execute(w, posts)
+	postsHTML(w, posts)
 }
 
 func getPostsID(w http.ResponseWriter, r *http.Request) {
@@ -657,21 +655,7 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := []Post{}
-	err = db.Select(&results, "SELECT "+
-		"p.id AS `id`,"+
-		"p.user_id AS `user_id`,"+
-		"p.body AS `body`,"+
-		"p.mime AS `mime`,"+
-		"p.created_at AS `created_at`, "+
-		"p.comment_count AS `comment_count`,"+
-		"u.id AS `user.id`, "+
-		"u.account_name AS `user.account_name` "+
-		"FROM `posts` p FORCE INDEX (PRIMARY) JOIN `users` u ON p.user_id = u.id WHERE p.id = ? AND u.del_flg = 0 LIMIT ?", pid, postsPerPage)
-	if err != nil {
-		log.Print(err)
-		return
-	}
+	results := []int{pid}
 
 	posts, err := makePosts(results, getCSRFToken(r), true)
 	if err != nil {
@@ -687,11 +671,7 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 	p := posts[0]
 
 	me := getSessionUser(r)
-
-	templPostsID.Execute(w, struct {
-		Post Post
-		Me   User
-	}{p, me})
+	postIDHTML(w, p, me)
 }
 
 func postIndex(w http.ResponseWriter, r *http.Request) {
@@ -751,13 +731,14 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	body := r.FormValue("body")
 	query := "INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (?,?,?,?)"
 	result, err := db.Exec(
 		query,
 		me.ID,
 		mime,
 		"",
-		r.FormValue("body"),
+		body,
 	)
 	if err != nil {
 		log.Print(err)
@@ -769,7 +750,25 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		log.Print(err)
 		return
 	}
-	writeImage(int(pid), mime, filedata)
+	id := int(pid)
+	n := time.Now()
+	writeImage(id, mime, filedata)
+
+	postLock.Lock()
+	postCache[id] = Post{
+		ID:           id,
+		UserID:       me.ID,
+		Mime:         mime,
+		Body:         body,
+		CommentCount: 0,
+		CreatedAt:    n,
+		Created:      n.Format("2006-01-02T15:04:05-07:00"),
+	}
+	postLock.Unlock()
+
+	recentCommentLock.Lock()
+	recentCommentCache[id] = []Comment{}
+	recentCommentLock.Unlock()
 
 	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)
 }
@@ -903,6 +902,12 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 	recentCommentCache[postID] = pc
 	recentCommentLock.Unlock()
 
+	postLock.Lock()
+	p := postCache[postID]
+	p.CommentCount++
+	postCache[postID] = p
+	postLock.Unlock()
+
 	http.Redirect(w, r, fmt.Sprintf("/posts/%d", postID), http.StatusFound)
 }
 
@@ -925,10 +930,7 @@ func getAdminBanned(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	template.Must(template.ParseFiles(
-		getTemplPath("layout.html"),
-		getTemplPath("banned.html")),
-	).Execute(w, struct {
+	templBanned.Execute(w, struct {
 		Users     []User
 		Me        User
 		CSRFToken string
@@ -1011,34 +1013,14 @@ func (reg *RegexpPattern) Match(r *http.Request) *http.Request {
 }
 
 func main() {
-	fmap := template.FuncMap{
-		"imageURL": imageURL,
-	}
 	templRegister = template.Must(template.ParseFiles(
 		getTemplPath("layout.html"),
 		getTemplPath("register.html")),
 	)
-	templIndex = template.Must(template.New("layout.html").Funcs(fmap).ParseFiles(
+	templBanned = template.Must(template.ParseFiles(
 		getTemplPath("layout.html"),
-		getTemplPath("index.html"),
-		getTemplPath("posts.html"),
-		getTemplPath("post.html"),
-	))
-	templUser = template.Must(template.New("layout.html").Funcs(fmap).ParseFiles(
-		getTemplPath("layout.html"),
-		getTemplPath("user.html"),
-		getTemplPath("posts.html"),
-		getTemplPath("post.html"),
-	))
-	templPosts = template.Must(template.New("posts.html").Funcs(fmap).ParseFiles(
-		getTemplPath("posts.html"),
-		getTemplPath("post.html"),
-	))
-	templPostsID = template.Must(template.New("layout.html").Funcs(fmap).ParseFiles(
-		getTemplPath("layout.html"),
-		getTemplPath("post_id.html"),
-		getTemplPath("post.html"),
-	))
+		getTemplPath("banned.html")),
+	)
 
 	host := os.Getenv("ISUCONP_DB_HOST")
 	if host == "" {
@@ -1182,4 +1164,274 @@ func sessionGet(r *http.Request, key string) (*simpleCookie, error) {
 	ctx := context.WithValue(r.Context(), key, newSession)
 	r = r.WithContext(ctx)
 	return newSession, nil
+}
+
+func loginHTML(dest io.Writer, me User, flash string) (int, error) {
+	b := bytebufferpool.Get()
+	defer func() {
+		bytebufferpool.Put(b)
+	}()
+	layoutHTMLheader(b, me)
+	b.WriteString(`<div class="header">
+<h1>ログイン</h1>
+</div>`)
+	if flash != "" {
+		b.WriteString(`<div id="notice-message" class="alert alert-danger">`)
+		b.WriteString(flash)
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`<div class="submit">
+<form method="post" action="/login">
+<div class="form-account-name">
+<span>アカウント名</span>
+<input type="text" name="account_name">
+</div>
+<div class="form-password">
+<span>パスワード</span>
+<input type="password" name="password">
+</div>
+<div class="form-submit">
+<input type="submit" name="submit" value="submit">
+</div>
+</form>
+</div>
+<div class="isu-register">
+<a href="/register">ユーザー登録</a>
+</div>`)
+	layoutHTMLfooter(b)
+	return dest.Write(b.Bytes())
+}
+
+func indexHTML(dest io.Writer, posts []byte, me User, token string, flash string) (int, error) {
+	b := bytebufferpool.Get()
+	defer func() {
+		bytebufferpool.Put(b)
+	}()
+	layoutHTMLheader(b, me)
+	b.WriteString(`
+<div class="isu-submit">
+<form method="post" action="/" enctype="multipart/form-data">
+<div class="isu-form">
+<input type="file" name="file" value="file">
+</div>
+<div class="isu-form">
+<textarea name="body"></textarea>
+</div>
+<div class="form-submit">
+<input type="hidden" name="csrf_token" value="`)
+	b.WriteString(token)
+	b.WriteString(`">
+<input type="submit" name="submit" value="submit">
+</div>`)
+	if flash != "" {
+		b.WriteString(`<div id="notice-message" class="alert alert-danger">`)
+		b.WriteString(flash)
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`</form>
+</div>`)
+	b.Write(posts)
+	b.WriteString(`<div id="isu-post-more">
+<button id="isu-post-more-btn">もっと見る</button>
+<img class="isu-loading-icon" src="/img/ajax-loader.gif">
+</div>`)
+	layoutHTMLfooter(b)
+	return dest.Write(b.Bytes())
+}
+
+func postIDHTML(dest io.Writer, p Post, me User) (int, error) {
+	b := bytebufferpool.Get()
+	defer func() {
+		bytebufferpool.Put(b)
+	}()
+	layoutHTMLheader(b, me)
+	postHTML(b, p)
+	layoutHTMLfooter(b)
+	return dest.Write(b.Bytes())
+}
+
+func userHTML(
+	dest io.Writer,
+	ps []Post,
+	user User,
+	postCount int,
+	commentCount int,
+	commentedCount int,
+	me User,
+) (int, error) {
+	b := bytebufferpool.Get()
+	defer func() {
+		bytebufferpool.Put(b)
+	}()
+	layoutHTMLheader(b, me)
+	b.WriteString(`<div class="isu-user">
+<div><span class="isu-user-account-name">`)
+	b.WriteString(user.AccountName)
+	b.WriteString(`さん</span>のページ</div>
+<div>投稿数 <span class="isu-post-count">`)
+
+	b.WriteString(strconv.Itoa(postCount))
+	b.WriteString(`</span></div>
+<div>コメント数 <span class="isu-comment-count">`)
+	b.WriteString(strconv.Itoa(commentCount))
+	b.WriteString(`</span></div>
+  <div>被コメント数 <span class="isu-commented-count">`)
+	b.WriteString(strconv.Itoa(commentedCount))
+	b.WriteString(`</span></div>
+</div>`)
+	b.WriteString(`<div class="isu-posts">`)
+	for _, p := range ps {
+		postHTML(b, p)
+	}
+	b.WriteString(`</div>`)
+	layoutHTMLfooter(b)
+	return dest.Write(b.Bytes())
+}
+
+func escapeHTMLWriter(b *bytebufferpool.ByteBuffer, s string) {
+	by := UnsafeBytes(s)
+	i := 0
+	for {
+		if i > len(by)-1 {
+			break
+		}
+		k := bytes.IndexByte(by[i:], '<')
+		if k < 0 {
+			b.Write(by[i:])
+			break
+		}
+		b.Write(by[i : i+k])
+		b.WriteString("&lt;")
+		i += k + len("&lt;")
+	}
+}
+
+func postsHTML(dest io.Writer, ps []Post) (int, error) {
+	b := bytebufferpool.Get()
+	defer func() {
+		bytebufferpool.Put(b)
+	}()
+	b.WriteString(`<div class="isu-posts">`)
+	for _, p := range ps {
+		postHTML(b, p)
+	}
+	b.WriteString(`</div>`)
+	return dest.Write(b.Bytes())
+}
+
+func layoutHTMLheader(b *bytebufferpool.ByteBuffer, me User) (int, error) {
+	b.WriteString(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Iscogram</title>
+<link href="/css/style.css" media="screen" rel="stylesheet" type="text/css">
+</head>
+<body>
+<div class="container">
+<div class="header">
+<div class="isu-title">
+<h1><a href="/">Iscogram</a></h1>
+</div>
+<div class="isu-header-menu">`)
+	if me.ID == 0 {
+		b.WriteString(`<div><a href="/login">ログイン</a></div>`)
+	} else {
+		b.WriteString(`<div><a href="/@`)
+		b.WriteString(me.AccountName)
+		b.WriteString(`"><span class="isu-account-name">`)
+		b.WriteString(me.AccountName)
+		b.WriteString(`</span>さん</a></div>`)
+		if me.Authority == 1 {
+			b.WriteString(`<div><a href="/admin/banned">管理者用ページ</a></div>`)
+		}
+		b.WriteString(`<div><a href="/logout">ログアウト</a></div>`)
+	}
+	return b.WriteString(`</div>
+</div>`)
+}
+
+func layoutHTMLfooter(b *bytebufferpool.ByteBuffer) (int, error) {
+	return b.WriteString(`</div>
+<script src="/js/timeago.min.js"></script>
+<script src="/js/main.js"></script>
+</body>
+</html>`)
+}
+
+func postHTML(b *bytebufferpool.ByteBuffer, p Post) {
+	sID := strconv.Itoa(p.ID)
+	b.WriteString(`<div class="isu-post" id="pid_`)
+	b.WriteString(sID)
+	b.WriteString(`" data-created-at="`)
+	b.WriteString(p.Created)
+	b.WriteString(`">
+<div class="isu-post-header">
+<a href="/@`)
+	b.WriteString(p.User.AccountName)
+	b.WriteString(`" class="isu-post-account-name">`)
+	b.WriteString(p.User.AccountName)
+	b.WriteString(`</a>
+<a href="/posts/`)
+	b.WriteString(sID)
+	b.WriteString(`" class="isu-post-permalink">
+<time class="timeago" datetime="`)
+	b.WriteString(p.Created)
+	b.WriteString(`"></time>
+</a>
+</div>
+<div class="isu-post-image">
+<img src="/image/`)
+	b.WriteString(sID)
+	if p.Mime == "image/jpeg" {
+		b.WriteString(`.jpg`)
+	} else if p.Mime == "image/png" {
+		b.WriteString(`.png`)
+	} else if p.Mime == "image/gif" {
+		b.WriteString(`.gif`)
+	}
+	b.WriteString(`" class="isu-image">
+</div>
+<div class="isu-post-text">
+<a href="/@`)
+	b.WriteString(p.User.AccountName)
+	b.WriteString(`" class="isu-post-account-name">`)
+	b.WriteString(p.User.AccountName)
+	b.WriteString(`</a>`)
+	escapeHTMLWriter(b, p.Body)
+	b.WriteString(`</div>
+<div class="isu-post-comment">
+<div class="isu-post-comment-count">
+comments: <b>`)
+	b.WriteString(strconv.Itoa(p.CommentCount))
+	b.WriteString(`</b>
+</div>`)
+
+	for _, c := range p.Comments {
+		b.WriteString(`<div class="isu-comment">
+<a href="/@`)
+		b.WriteString(c.User.AccountName)
+		b.WriteString(`" class="isu-comment-account-name">`)
+		b.WriteString(c.User.AccountName)
+		b.WriteString(`</a>
+<span class="isu-comment-text">`)
+		escapeHTMLWriter(b, c.Comment)
+		b.WriteString(`</span>
+</div>`)
+	}
+
+	b.WriteString(`<div class="isu-comment-form">
+<form method="post" action="/comment">
+<input type="text" name="comment">
+<input type="hidden" name="post_id" value="`)
+	b.WriteString(sID)
+	b.WriteString(`">
+<input type="hidden" name="csrf_token" value="`)
+	b.WriteString(p.CSRFToken)
+	b.WriteString(`">
+<input type="submit" name="submit" value="submit">
+</form>
+</div>
+</div>
+</div>`)
 }

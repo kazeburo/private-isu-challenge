@@ -452,3 +452,45 @@ MiB Swap:   4096.0 total,   3813.2 free,    282.8 used.    497.7 avail Mem
    2218 www-data  20   0   56788   4672   2116 S  20.3   0.5   2:52.02 nginx
 ```
 
+## Cache Posts
+
+```
+{"pass":true,"score":549803,"success":526221,"fail":0,"messages":[]}
+{"pass":true,"score":544678,"success":521165,"fail":0,"messages":[]}
+{"pass":true,"score":543109,"success":519612,"fail":0,"messages":[]}
+```
+
+## getLogin template cache
+
+忘れてた
+
+```
+{"pass":true,"score":556188,"success":532511,"fail":0,"messages":[]}
+{"pass":true,"score":532122,"success":509214,"fail":0,"messages":[]}
+{"pass":true,"score":548705,"success":525309,"fail":0,"messages":[]}
+```
+
+## Bye template
+
+templateをつかわない
+
+```
+{"pass":true,"score":629775,"success":590641,"fail":0,"messages":[]}
+{"pass":true,"score":619105,"success":580828,"fail":0,"messages":[]}
+{"pass":true,"score":627211,"success":588384,"fail":0,"messages":[]}
+```
+
+appのCPUがかなり削減
+
+```
+Tasks:  91 total,   3 running,  88 sleeping,   0 stopped,   0 zombie
+%Cpu(s): 46.2 us, 20.8 sy,  0.0 ni, 14.0 id,  4.2 wa,  0.0 hi, 14.6 si,  0.2 st
+MiB Mem :    981.1 total,     69.7 free,    302.2 used,    609.1 buff/cache
+MiB Swap:   4096.0 total,   3760.5 free,    335.5 used.    529.1 avail Mem
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  35167 isucon    20   0 1305024  65896   8308 S  59.5   6.6   0:32.61 app
+    470 mysql     20   0 1750636 140692   9580 S  33.6  14.0  35:20.34 mysqld
+  33787 www-data  20   0   56856   4676   2016 R  32.2   0.5   5:33.81 nginx
+  33786 www-data  20   0   56796   4616   2016 R  29.9   0.5   4:23.76 nginx   
+```
