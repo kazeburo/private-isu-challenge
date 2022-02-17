@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	crand "crypto/rand"
 	"crypto/sha512"
 	"encoding/base64"
@@ -10,8 +9,6 @@ import (
 	"html/template"
 	"io"
 	"log"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -26,12 +23,10 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/gofiber/fiber/v2"
 	"github.com/jmoiron/sqlx"
 	"github.com/mojura/enkodo"
 	"github.com/valyala/bytebufferpool"
-	goji "goji.io"
-	"goji.io/pat"
-	"goji.io/pattern"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 )
@@ -104,6 +99,11 @@ func UnsafeBytes(s string) (bs []byte) {
 	bh.Len = sh.Len
 	bh.Cap = sh.Len
 	return
+}
+
+// CopyString copies a string to make it immutable
+func CopyString(s string) string {
+	return string(UnsafeBytes(s))
 }
 
 func init() {
@@ -220,16 +220,16 @@ func calculatePasshash(accountName, password string) string {
 	return digest(password + ":" + calculateSalt(accountName))
 }
 
-func getSession(r *http.Request) *simpleCookie {
-	session, err := sessionGet(r, "isuconp-go.session")
+func getSession(c *fiber.Ctx) *simpleCookie {
+	session, err := sessionGet(c, "isuconp-go.session")
 	if err != nil {
 		log.Print(err)
 	}
 	return session
 }
 
-func getSessionUser(r *http.Request) User {
-	session := getSession(r)
+func getSessionUser(c *fiber.Ctx) User {
+	session := getSession(c)
 	id := session.Values.UserID
 
 	userLock.RLock()
@@ -241,15 +241,15 @@ func getSessionUser(r *http.Request) User {
 	return u
 }
 
-func getFlash(w http.ResponseWriter, r *http.Request) string {
-	session := getSession(r)
+func getFlash(c *fiber.Ctx) string {
+	session := getSession(c)
 	notice := session.Values.Notice
 
 	if notice == "" {
 		return ""
 	} else {
 		session.Values.Notice = ""
-		session.Save(w, r)
+		session.Save(c)
 		return notice
 	}
 }
@@ -329,8 +329,8 @@ func isLogin(u User) bool {
 	return u.ID != 0
 }
 
-func getCSRFToken(r *http.Request) string {
-	session := getSession(r)
+func getCSRFToken(c *fiber.Ctx) string {
+	session := getSession(c)
 	return session.Values.CSRFToken
 }
 
@@ -346,75 +346,73 @@ func getTemplPath(filename string) string {
 	return path.Join("templates", filename)
 }
 
-func getInitialize(w http.ResponseWriter, r *http.Request) {
+func getInitialize(c *fiber.Ctx) error {
 	dbInitialize()
 	warmupCache()
-	w.WriteHeader(http.StatusOK)
+	return c.SendStatus(fiber.StatusOK)
 }
 
-func getLogin(w http.ResponseWriter, r *http.Request) {
-	me := getSessionUser(r)
+func getLogin(c *fiber.Ctx) error {
+	me := getSessionUser(c)
 
 	if isLogin(me) {
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
+		return c.Redirect("/", fiber.StatusFound)
 	}
 
-	loginHTML(w, me, getFlash(w, r))
+	loginHTML(c.Status(fiber.StatusOK), me, getFlash(c))
+	return nil
 }
 
-func postLogin(w http.ResponseWriter, r *http.Request) {
-	if isLogin(getSessionUser(r)) {
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
+func postLogin(c *fiber.Ctx) error {
+	if isLogin(getSessionUser(c)) {
+		return c.Redirect("/", fiber.StatusFound)
 	}
 
-	u := tryLogin(r.FormValue("account_name"), r.FormValue("password"))
+	u := tryLogin(c.FormValue("account_name"), c.FormValue("password"))
 
 	if u != nil {
-		session := getSession(r)
+		session := getSession(c)
 		session.Values.UserID = u.ID
 		session.Values.CSRFToken = secureRandomStr(16)
-		session.Save(w, r)
+		session.Save(c)
 
-		http.Redirect(w, r, "/", http.StatusFound)
+		return c.Redirect("/", fiber.StatusFound)
 	} else {
-		session := getSession(r)
+		session := getSession(c)
 		session.Values.Notice = "アカウント名かパスワードが間違っています"
-		session.Save(w, r)
+		session.Save(c)
 
-		http.Redirect(w, r, "/login", http.StatusFound)
+		return c.Redirect("/login", fiber.StatusFound)
 	}
 }
 
-func getRegister(w http.ResponseWriter, r *http.Request) {
-	if isLogin(getSessionUser(r)) {
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
+func getRegister(c *fiber.Ctx) error {
+	if isLogin(getSessionUser(c)) {
+		return c.Redirect("/", fiber.StatusFound)
+
 	}
 
-	templRegister.Execute(w, struct {
+	templRegister.Execute(c.Status(fiber.StatusOK), struct {
 		Me    User
 		Flash string
-	}{User{}, getFlash(w, r)})
+	}{User{}, getFlash(c)})
+	return nil
 }
 
-func postRegister(w http.ResponseWriter, r *http.Request) {
-	if isLogin(getSessionUser(r)) {
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
+func postRegister(c *fiber.Ctx) error {
+	if isLogin(getSessionUser(c)) {
+		return c.Redirect("/", fiber.StatusFound)
 	}
 
-	accountName, password := r.FormValue("account_name"), r.FormValue("password")
+	accountName, password := c.FormValue("account_name"), c.FormValue("password")
 
 	validated := validateUser(accountName, password)
 	if !validated {
-		session := getSession(r)
+		session := getSession(c)
 		session.Values.Notice = "アカウント名は3文字以上、パスワードは6文字以上である必要があります"
-		session.Save(w, r)
+		session.Save(c)
 
-		http.Redirect(w, r, "/register", http.StatusFound)
-		return
+		return c.Redirect("/register", fiber.StatusFound)
 	}
 
 	exists := 0
@@ -422,12 +420,11 @@ func postRegister(w http.ResponseWriter, r *http.Request) {
 	db.Get(&exists, "SELECT 1 FROM users WHERE `account_name` = ?", accountName)
 
 	if exists == 1 {
-		session := getSession(r)
+		session := getSession(c)
 		session.Values.Notice = "アカウント名がすでに使われています"
-		session.Save(w, r)
+		session.Save(c)
 
-		http.Redirect(w, r, "/register", http.StatusFound)
-		return
+		return c.Redirect("/register", fiber.StatusFound)
 	}
 
 	pw := calculatePasshash(accountName, password)
@@ -435,14 +432,14 @@ func postRegister(w http.ResponseWriter, r *http.Request) {
 	result, err := db.Exec(query, accountName, pw)
 	if err != nil {
 		log.Print(err)
-		return
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
-	session := getSession(r)
+	session := getSession(c)
 	uid, err := result.LastInsertId()
 	if err != nil {
 		log.Print(err)
-		return
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
 	userLock.Lock()
@@ -456,17 +453,17 @@ func postRegister(w http.ResponseWriter, r *http.Request) {
 
 	session.Values.UserID = int(uid)
 	session.Values.CSRFToken = secureRandomStr(16)
-	session.Save(w, r)
+	session.Save(c)
 
-	http.Redirect(w, r, "/", http.StatusFound)
+	return c.Redirect("/", fiber.StatusFound)
 }
 
-func getLogout(w http.ResponseWriter, r *http.Request) {
-	session := getSession(r)
+func getLogout(c *fiber.Ctx) error {
+	session := getSession(c)
 	session.Values.UserID = 0
-	session.Save(w, r)
+	session.Save(c)
 
-	http.Redirect(w, r, "/", http.StatusFound)
+	return c.Redirect("/", fiber.StatusFound)
 }
 
 func updateIndex() {
@@ -497,9 +494,9 @@ func updateIndex() {
 	})
 }
 
-func getIndex(w http.ResponseWriter, r *http.Request) {
-	me := getSessionUser(r)
-	token := getCSRFToken(r)
+func getIndex(c *fiber.Ctx) error {
+	me := getSessionUser(c)
+	token := getCSRFToken(c)
 	bToken := []byte(token)
 
 	b := bytebufferpool.Get()
@@ -520,30 +517,29 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 		i += k + len("[[getCSRFToken]]")
 	}
 	indexLock.RUnlock()
-	indexHTML(w, b.Bytes(), me, token, getFlash(w, r))
+	indexHTML(c.Status(fiber.StatusOK), b.Bytes(), me, token, getFlash(c))
+	return nil
 }
 
-func getAccountName(w http.ResponseWriter, r *http.Request) {
-	accountName := pat.Param(r, "accountName")
+func getAccountName(c *fiber.Ctx) error {
+	accountName := c.Params("accountName")
 
 	userLock.RLock()
 	uid, ok := accountCache[accountName]
 	if !ok {
 		userLock.RUnlock()
-		w.WriteHeader(http.StatusNotFound)
-		return
+		return c.SendStatus(fiber.StatusNotFound)
 	}
 	user := userCache[uid]
 	userLock.RUnlock()
 
 	if user.ID == 0 || user.DelFlg != 0 {
-		w.WriteHeader(http.StatusNotFound)
-		return
+		return c.SendStatus(fiber.StatusNotFound)
 	}
 
 	var eg errgroup.Group
 	posts := make([]Post, 0, postsPerPage)
-	token := getCSRFToken(r)
+	token := getCSRFToken(c)
 	eg.Go(func() error {
 		results := make([]int, 0, relaxPostPerPage)
 		err := db.Select(&results, "SELECT "+
@@ -585,14 +581,13 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 
 	if err := eg.Wait(); err != nil {
 		log.Print(err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
-	me := getSessionUser(r)
+	me := getSessionUser(c)
 
 	userHTML(
-		w,
+		c.Status(fiber.StatusOK),
 		posts,
 		user,
 		postCount,
@@ -600,24 +595,19 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 		commentedCount,
 		me,
 	)
+	return nil
 }
 
-func getPosts(w http.ResponseWriter, r *http.Request) {
-	m, err := url.ParseQuery(r.URL.RawQuery)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Print(err)
-		return
-	}
-	maxCreatedAt := m.Get("max_created_at")
+func getPosts(c *fiber.Ctx) error {
+	maxCreatedAt := c.Query("max_created_at")
 	if maxCreatedAt == "" {
-		return
+		return c.SendStatus(fiber.StatusBadRequest)
 	}
 
 	t, err := time.Parse(ISO8601Format, maxCreatedAt)
 	if err != nil {
 		log.Print(err)
-		return
+		return c.SendStatus(fiber.StatusBadRequest)
 	}
 
 	results := make([]int, 0, relaxPostPerPage)
@@ -627,107 +617,98 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 		"WHERE `created_at` <= ? ORDER BY `created_at` DESC LIMIT ?", t.Format(ISO8601Format), relaxPostPerPage)
 	if err != nil {
 		log.Print(err)
-		return
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
-	posts, err := makePosts(results, getCSRFToken(r), false)
+	posts, err := makePosts(results, getCSRFToken(c), false)
 	if err != nil {
 		log.Print(err)
-		return
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
 	if len(posts) == 0 {
-		w.WriteHeader(http.StatusNotFound)
-		return
+		return c.SendStatus(fiber.StatusNotFound)
 	}
-	postsHTML(w, posts)
+	postsHTML(c, posts)
+	return nil
 }
 
-func getPostsID(w http.ResponseWriter, r *http.Request) {
-	pidStr := pat.Param(r, "id")
+func getPostsID(c *fiber.Ctx) error {
+	pidStr := c.Params("id")
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		return
+		return c.SendStatus(fiber.StatusNotFound)
 	}
 
 	results := []int{pid}
 
-	posts, err := makePosts(results, getCSRFToken(r), true)
+	posts, err := makePosts(results, getCSRFToken(c), true)
 	if err != nil {
 		log.Print(err)
-		return
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
 	if len(posts) == 0 {
-		w.WriteHeader(http.StatusNotFound)
-		return
+		return c.SendStatus(fiber.StatusNotFound)
 	}
 
 	p := posts[0]
 
-	me := getSessionUser(r)
-	postIDHTML(w, p, me)
+	me := getSessionUser(c)
+	postIDHTML(c.Status(fiber.StatusOK), p, me)
+	return nil
 }
 
-func postIndex(w http.ResponseWriter, r *http.Request) {
-	me := getSessionUser(r)
+func postIndex(c *fiber.Ctx) error {
+	me := getSessionUser(c)
 	if !isLogin(me) {
-		http.Redirect(w, r, "/login", http.StatusFound)
-		return
+		return c.Redirect("/login", fiber.StatusFound)
 	}
 
-	if r.FormValue("csrf_token") != getCSRFToken(r) {
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		return
-	}
+	token := c.FormValue("csrf_token")
+	body := c.FormValue("body")
+	uploadfile, err := c.FormFile("file")
 
-	file, header, err := r.FormFile("file")
 	if err != nil {
-		session := getSession(r)
-		session.Values.Notice = "画像が必須です"
-		session.Save(w, r)
+		return c.SendStatus(fiber.StatusUnprocessableEntity)
+	}
 
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
+	if token != getCSRFToken(c) {
+		return c.SendStatus(fiber.StatusUnprocessableEntity)
+	}
+
+	if uploadfile == nil {
+		session := getSession(c)
+		session.Values.Notice = "画像が必須です"
+		session.Save(c)
+		return c.Redirect("/", fiber.StatusFound)
 	}
 
 	mime := ""
-	if file != nil {
-		// 投稿のContent-Typeからファイルのタイプを決定する
-		contentType := header.Header["Content-Type"][0]
-		if strings.Contains(contentType, "jpeg") {
-			mime = "image/jpeg"
-		} else if strings.Contains(contentType, "png") {
-			mime = "image/png"
-		} else if strings.Contains(contentType, "gif") {
-			mime = "image/gif"
-		} else {
-			session := getSession(r)
-			session.Values.Notice = "投稿できる画像形式はjpgとpngとgifだけです"
-			session.Save(w, r)
 
-			http.Redirect(w, r, "/", http.StatusFound)
-			return
-		}
+	// 投稿のContent-Typeからファイルのタイプを決定する
+	contentType := uploadfile.Header["Content-Type"][0]
+	if strings.Contains(contentType, "jpeg") {
+		mime = "image/jpeg"
+	} else if strings.Contains(contentType, "png") {
+		mime = "image/png"
+	} else if strings.Contains(contentType, "gif") {
+		mime = "image/gif"
+	} else {
+		session := getSession(c)
+		session.Values.Notice = "投稿できる画像形式はjpgとpngとgifだけです"
+		session.Save(c)
+
+		return c.Redirect("/", fiber.StatusFound)
 	}
 
-	filedata, err := io.ReadAll(file)
-	if err != nil {
-		log.Print(err)
-		return
-	}
-
-	if len(filedata) > UploadLimit {
-		session := getSession(r)
+	if uploadfile.Size > UploadLimit {
+		session := getSession(c)
 		session.Values.Notice = "ファイルサイズが大きすぎます"
-		session.Save(w, r)
-
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
+		session.Save(c)
+		return c.Redirect("/", fiber.StatusFound)
 	}
 
-	body := r.FormValue("body")
 	query := "INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (?,?,?,?)"
 	result, err := db.Exec(
 		query,
@@ -738,18 +719,20 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		log.Print(err)
-		return
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
 	pid, err := result.LastInsertId()
 	if err != nil {
 		log.Print(err)
-		return
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
-	id := int(pid)
-	n := time.Now()
-	writeImage(id, mime, filedata)
 
+	id := int(pid)
+	dst := imagePath(id, mime)
+	c.SaveFile(uploadfile, dst)
+
+	n := time.Now()
 	postLock.Lock()
 	postCache[id] = Post{
 		ID:           id,
@@ -768,7 +751,7 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 
 	updateIndex()
 
-	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)
+	return c.Redirect("/posts/"+strconv.FormatInt(pid, 10), fiber.StatusFound)
 }
 
 func imagePath(id int, mime string) string {
@@ -798,67 +781,84 @@ func writeImage(id int, mime string, data []byte) {
 	f.Close()
 }
 
-func getImage(w http.ResponseWriter, r *http.Request) {
-	pidStr := pat.Param(r, "id")
+func getImage(c *fiber.Ctx) error {
+	ims := c.Request().Header.Peek(fiber.HeaderIfModifiedSince)
+	if len(ims) > 0 {
+		return c.SendStatus(fiber.StatusNotModified)
+	}
+
+	pidStr := c.Params("id")
+	ext := c.Params("ext")
+	fn := "../public/image/" + pidStr + "." + ext
+	stat, err := os.Stat(fn)
+	if err == nil {
+		switch ext {
+		case "jpg":
+			c.Set("Content-Type", "image/jpeg")
+		case "png":
+			c.Set("Content-Type", "image/png")
+		case "gif":
+			c.Set("Content-Type", "image/gif")
+		}
+		file, _ := os.Open(fn)
+		c.Set("Last-Modified", "Mon, 31 May 2021 04:50:49 GMT")
+		c.Set("Cache-Control", "public, max-age=300")
+		return c.Status(fiber.StatusOK).SendStream(file, int(stat.Size()))
+	}
+
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		return
+		return c.SendStatus(fiber.StatusNotFound)
 	}
 
 	post := Post{}
 	err = db.Get(&post, "SELECT * FROM `images` WHERE `id` = ?", pid)
 	if err != nil {
 		log.Print(err)
-		return
+		return c.SendStatus(fiber.StatusNotFound)
 	}
-
-	ext := pat.Param(r, "ext")
 
 	if ext == "jpg" && post.Mime == "image/jpeg" ||
 		ext == "png" && post.Mime == "image/png" ||
 		ext == "gif" && post.Mime == "image/gif" {
 		writeImage(pid, post.Mime, post.Imgdata)
-		w.Header().Set("Content-Type", post.Mime)
-		_, err := w.Write(post.Imgdata)
-		if err != nil {
-			log.Print(err)
-			return
-		}
-		return
+		now := time.Now().Format("Mon, 02 Jan 2006 15:04:05 MST")
+		c.Set("Last-Modified", now)
+		c.Set("Cache-Control", "public, max-age=300")
+		c.Set("Content-Type", post.Mime)
+		return c.Status(fiber.StatusOK).Send(post.Imgdata)
 	}
 
-	w.WriteHeader(http.StatusNotFound)
+	return c.SendStatus(fiber.StatusNotFound)
 }
 
-func postComment(w http.ResponseWriter, r *http.Request) {
-	me := getSessionUser(r)
+func postComment(c *fiber.Ctx) error {
+	me := getSessionUser(c)
 	if !isLogin(me) {
-		http.Redirect(w, r, "/login", http.StatusFound)
-		return
+		return c.Redirect("/login", fiber.StatusFound)
 	}
 
-	if r.FormValue("csrf_token") != getCSRFToken(r) {
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		return
+	if c.FormValue("csrf_token") != getCSRFToken(c) {
+		return c.SendStatus(fiber.StatusUnprocessableEntity)
 	}
 
-	postID, err := strconv.Atoi(r.FormValue("post_id"))
+	postID, err := strconv.Atoi(c.FormValue("post_id"))
 	if err != nil {
 		log.Print("post_idは整数のみです")
-		return
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
-	body := r.FormValue("comment")
+
+	body := c.FormValue("comment")
 	query := "INSERT INTO `comments` (`post_id`, `user_id`, `comment`) VALUES (?,?,?)"
 	result, err := db.Exec(query, postID, me.ID, body)
 	if err != nil {
 		log.Print(err)
-		return
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 	cid, err := result.LastInsertId()
 	if err != nil {
 		log.Print(err)
-		return
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
 	recentCommentLock.Lock()
@@ -867,7 +867,7 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 		ID:      int(cid),
 		PostID:  postID,
 		UserID:  me.ID,
-		Comment: body,
+		Comment: CopyString(body),
 	})
 	if len(pc) > 3 {
 		pc = pc[1:3]
@@ -881,97 +881,75 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 	postCache[postID] = p
 	postLock.Unlock()
 
-	http.Redirect(w, r, fmt.Sprintf("/posts/%d", postID), http.StatusFound)
+	return c.Redirect("/posts/"+strconv.Itoa(postID), fiber.StatusFound)
 }
 
-func getAdminBanned(w http.ResponseWriter, r *http.Request) {
-	me := getSessionUser(r)
+func getAdminBanned(c *fiber.Ctx) error {
+	me := getSessionUser(c)
 	if !isLogin(me) {
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
+		return c.Redirect("/", fiber.StatusFound)
 	}
 
 	if me.Authority == 0 {
-		w.WriteHeader(http.StatusForbidden)
-		return
+		return c.SendStatus(fiber.StatusForbidden)
 	}
 
 	users := []User{}
 	err := db.Select(&users, "SELECT * FROM `users` WHERE `authority` = 0 AND `del_flg` = 0 ORDER BY `created_at` DESC")
 	if err != nil {
 		log.Print(err)
-		return
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
-	templBanned.Execute(w, struct {
+	templBanned.Execute(c.Status(fiber.StatusOK), struct {
 		Users     []User
 		Me        User
 		CSRFToken string
-	}{users, me, getCSRFToken(r)})
+	}{users, me, getCSRFToken(c)})
+	return nil
 }
 
-func postAdminBanned(w http.ResponseWriter, r *http.Request) {
-	me := getSessionUser(r)
+func postAdminBanned(c *fiber.Ctx) error {
+	me := getSessionUser(c)
 	if !isLogin(me) {
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
+		return c.Redirect("/", fiber.StatusFound)
 	}
 
 	if me.Authority == 0 {
-		w.WriteHeader(http.StatusForbidden)
-		return
+		return c.SendStatus(fiber.StatusForbidden)
 	}
 
-	if r.FormValue("csrf_token") != getCSRFToken(r) {
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		return
+	if c.FormValue("csrf_token") != getCSRFToken(c) {
+		return c.SendStatus(fiber.StatusUnprocessableEntity)
 	}
 
 	query := "UPDATE `users` SET `del_flg` = ? WHERE `id` = ?"
 
-	err := r.ParseForm()
+	mf, err := c.MultipartForm()
 	if err != nil {
 		log.Print(err)
-		return
+		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
-	for _, id := range r.Form["uid[]"] {
+	for _, id := range mf.Value["uid[]"] {
 		db.Exec(query, 1, id)
 	}
 	userLock.Lock()
-	for _, id := range r.Form["uid[]"] {
+	for _, id := range mf.Value["uid[]"] {
 		i, _ := strconv.Atoi(id)
 		u := userCache[i]
 		u.DelFlg = 1
 		userCache[i] = u
 	}
 	userLock.Unlock()
-	http.Redirect(w, r, "/admin/banned", http.StatusFound)
+	return c.Redirect("/admin/banned", fiber.StatusFound)
 }
 
-type RegexpPattern struct {
-	regexp *regexp.Regexp
-}
-
-func Regexp(reg *regexp.Regexp) *RegexpPattern {
-	return &RegexpPattern{regexp: reg}
-}
-
-func (reg *RegexpPattern) Match(r *http.Request) *http.Request {
-	ctx := r.Context()
-	uPath := pattern.Path(ctx)
-	if reg.regexp.MatchString(uPath) {
-		values := reg.regexp.FindStringSubmatch(uPath)
-		keys := reg.regexp.SubexpNames()
-
-		for i := 1; i < len(keys); i++ {
-			ctx = context.WithValue(ctx, pattern.Variable(keys[i]), values[i])
-		}
-
-		return r.WithContext(ctx)
+func notModifiedFirst(c *fiber.Ctx) error {
+	if len(c.Request().Header.Peek(fiber.HeaderIfModifiedSince)) > 0 {
+		return c.SendStatus(fiber.StatusNotModified)
 	}
-
-	return nil
+	return c.Next()
 }
 
 func main() {
@@ -1026,26 +1004,42 @@ func main() {
 	warmupCache()
 	updateIndex()
 
-	mux := goji.NewMux()
+	app := fiber.New(fiber.Config{
+		BodyLimit:          UploadLimit,
+		Immutable:          false,
+		ReduceMemoryUsage:  true,
+		DisableDefaultDate: true,
+	})
 
-	mux.HandleFunc(pat.Get("/initialize"), getInitialize)
-	mux.HandleFunc(pat.Get("/login"), getLogin)
-	mux.HandleFunc(pat.Post("/login"), postLogin)
-	mux.HandleFunc(pat.Get("/register"), getRegister)
-	mux.HandleFunc(pat.Post("/register"), postRegister)
-	mux.HandleFunc(pat.Get("/logout"), getLogout)
-	mux.HandleFunc(pat.Get("/"), getIndex)
-	mux.HandleFunc(pat.Get("/posts"), getPosts)
-	mux.HandleFunc(pat.Get("/posts/:id"), getPostsID)
-	mux.HandleFunc(pat.Post("/"), postIndex)
-	mux.HandleFunc(pat.Get("/image/:id.:ext"), getImage)
-	mux.HandleFunc(pat.Post("/comment"), postComment)
-	mux.HandleFunc(pat.Get("/admin/banned"), getAdminBanned)
-	mux.HandleFunc(pat.Post("/admin/banned"), postAdminBanned)
-	mux.HandleFunc(Regexp(regexp.MustCompile(`^/@(?P<accountName>[a-zA-Z]+)$`)), getAccountName)
-	mux.Handle(pat.Get("/*"), http.FileServer(http.Dir("../public")))
+	app.Use("/js", notModifiedFirst)
+	app.Use("/css", notModifiedFirst)
+	app.Use("/img", notModifiedFirst)
+	app.Use("/favicon.ico", notModifiedFirst)
 
-	log.Fatal(http.ListenAndServe(":8080", mux))
+	app.Get("/initialize", getInitialize)
+	app.Get("/login", getLogin)
+	app.Post("/login", postLogin)
+	app.Get("/register", getRegister)
+	app.Post("/register", postRegister)
+	app.Get("/logout", getLogout)
+	app.Get("/", getIndex)
+
+	app.Get("/posts", getPosts)
+	app.Get("/posts/:id", getPostsID)
+	app.Post("/", postIndex)
+	app.Get("/image/:id.:ext", getImage)
+	app.Post("/comment", postComment)
+	app.Get("/admin/banned", getAdminBanned)
+	app.Post("/admin/banned", postAdminBanned)
+
+	app.Get("/@:accountName", getAccountName)
+
+	app.Static("/js/main.js", "../public/js/main.js")
+	app.Static("/js/timeago.min.js", "../public/js/timeago.min.js")
+	app.Static("/img/ajax-loader.gif", "../public/img/ajax-loader.gif")
+	app.Static("/css/style.css", "../public/css/style.css")
+	app.Static("/favicon.ico", "../public/favicon.ico")
+	log.Fatal(app.Listen("0.0.0.0:8080"))
 }
 
 type simpleCookie struct {
@@ -1082,30 +1076,29 @@ func (s *sessionData) UnmarshalEnkodo(dec *enkodo.Decoder) error {
 	return nil
 }
 
-func (s *simpleCookie) Save(w http.ResponseWriter, r *http.Request) error {
+func (s *simpleCookie) Save(c *fiber.Ctx) error {
 	bs, err := enkodo.Marshal(&s.Values)
 	if err != nil {
 		return err
 	}
 	data := base64.StdEncoding.EncodeToString(bs)
 
-	cookie := &http.Cookie{
+	c.Cookie(&fiber.Cookie{
 		Name:  s.Key,
 		Value: data,
-	}
-	http.SetCookie(w, cookie)
+	})
 	return nil
 }
 
-func sessionGet(r *http.Request, key string) (*simpleCookie, error) {
-	s := r.Context().Value(key)
+func sessionGet(c *fiber.Ctx, key string) (*simpleCookie, error) {
+	s := c.Locals(key)
 	if s != nil {
 		return s.(*simpleCookie), nil
 	}
 	var sd sessionData
-	cookie, err := r.Cookie(key)
-	if err == nil {
-		data, err := base64.StdEncoding.DecodeString(cookie.Value)
+	cookie := c.Cookies(key)
+	if cookie != "" {
+		data, err := base64.StdEncoding.DecodeString(cookie)
 		if err != nil {
 			return nil, err
 		}
@@ -1117,8 +1110,7 @@ func sessionGet(r *http.Request, key string) (*simpleCookie, error) {
 		Values: sd,
 		Key:    key,
 	}
-	ctx := context.WithValue(r.Context(), key, newSession)
-	r = r.WithContext(ctx)
+	c.Locals(key, newSession)
 	return newSession, nil
 }
 
