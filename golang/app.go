@@ -39,6 +39,8 @@ var (
 	templUser          *template.Template
 	templPosts         *template.Template
 	templPostsID       *template.Template
+	postLock           sync.RWMutex
+	postCache          map[int]Post
 	recentCommentLock  sync.RWMutex
 	recentCommentCache map[int][]Comment
 	userLock           sync.RWMutex
@@ -48,9 +50,10 @@ var (
 )
 
 const (
-	postsPerPage  = 20
-	ISO8601Format = "2006-01-02T15:04:05-07:00"
-	UploadLimit   = 10 * 1024 * 1024 // 10mb
+	postsPerPage     = 20
+	relaxPostPerPage = 25
+	ISO8601Format    = "2006-01-02T15:04:05-07:00"
+	UploadLimit      = 10 * 1024 * 1024 // 10mb
 )
 
 type User struct {
@@ -69,7 +72,8 @@ type Post struct {
 	Body         string    `db:"body"`
 	Mime         string    `db:"mime"`
 	CreatedAt    time.Time `db:"created_at"`
-	CommentCount int       `db:"comment_count"`
+	Created      string
+	CommentCount int `db:"comment_count"`
 	Comments     []Comment
 	User         User
 	CSRFToken    string
@@ -131,7 +135,15 @@ func warmupCache() {
 	userLock.Unlock()
 
 	posts := []Post{}
-	db.Select(&posts, "SELECT `id` FROM posts")
+	db.Select(&posts, "SELECT `id`, `user_id`, `body`, `mime`, `comment_count`,`created_at` FROM posts")
+	postsMap := map[int]Post{}
+	for _, p := range posts {
+		p.Created = p.CreatedAt.Format("2006-01-02T15:04:05-07:00")
+		postsMap[p.ID] = p
+	}
+	postLock.Lock()
+	postCache = postsMap
+	postLock.Unlock()
 
 	recentCommentMap := map[int][]Comment{}
 	comments := []Comment{}
@@ -236,11 +248,18 @@ func getFlash(w http.ResponseWriter, r *http.Request) string {
 	}
 }
 
-func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, error) {
+func makePosts(results []int, csrfToken string, allComments bool) ([]Post, error) {
 	posts := make([]Post, 0, postsPerPage)
 	commentPostIDs := make([]int, 0, postsPerPage)
 	totalComment := 0
-	for _, p := range results {
+	for _, i := range results {
+		postLock.RLock()
+		p, ok := postCache[i]
+		postLock.RUnlock()
+		if !ok {
+			continue
+		}
+
 		if !allComments || p.CommentCount <= 3 {
 			recentCommentLock.RLock()
 			p.Comments = recentCommentCache[p.ID]
@@ -253,6 +272,9 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 		}
 
 		p.CSRFToken = csrfToken
+		userLock.RLock()
+		p.User = userCache[p.UserID]
+		userLock.RUnlock()
 
 		if p.User.DelFlg == 0 {
 			posts = append(posts, p)
@@ -462,20 +484,12 @@ func getLogout(w http.ResponseWriter, r *http.Request) {
 
 func getSFIndex(token string) ([]Post, error) {
 	v, err, _ := sfGroup.Do("getIndex", func() (interface{}, error) {
-		results := []Post{}
+		results := make([]int, 0, relaxPostPerPage)
 
 		err := db.Select(&results, "SELECT "+
-			"p.id AS `id`,"+
-			"p.user_id AS `user_id`,"+
-			"p.body AS `body`,"+
-			"p.mime AS `mime`,"+
-			"p.created_at AS `created_at`, "+
-			"p.comment_count AS `comment_count`,"+
-			"u.id AS `user.id`, "+
-			"u.account_name AS `user.account_name` "+
-			"FROM `posts` p FORCE INDEX (posts_order_idx) JOIN `users` u ON p.user_id = u.id "+
-			"WHERE u.del_flg = 0 "+
-			"ORDER BY p.created_at DESC LIMIT ?", postsPerPage)
+			"`id` "+
+			"FROM `posts` FORCE INDEX (posts_order_idx) "+
+			"ORDER BY `created_at` DESC LIMIT ?", relaxPostPerPage)
 		if err != nil {
 			log.Print(err)
 			return nil, err
@@ -539,17 +553,11 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 	var posts []Post
 	token := getCSRFToken(r)
 	eg.Go(func() error {
-		results := []Post{}
+		results := make([]int, 0, 25)
 		err := db.Select(&results, "SELECT "+
-			"p.id AS `id`,"+
-			"p.user_id AS `user_id`,"+
-			"p.body AS `body`,"+
-			"p.mime AS `mime`,"+
-			"p.created_at AS `created_at`, "+
-			"p.comment_count AS `comment_count`,"+
-			"u.id AS `user.id`, "+
-			"u.account_name AS `user.account_name` "+
-			"FROM `posts` p FORCE INDEX (posts_user_idx) JOIN `users` u ON p.user_id = u.id WHERE p.user_id = ?  AND u.del_flg = 0 ORDER BY p.created_at DESC LIMIT ?", user.ID, postsPerPage)
+			"`id` "+
+			"FROM `posts` FORCE INDEX (posts_user_idx) WHERE `user_id` = ? "+
+			"ORDER BY `created_at` DESC LIMIT ?", user.ID, relaxPostPerPage)
 		if err != nil {
 			return err
 		}
@@ -619,17 +627,11 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := []Post{}
+	results := make([]int, 0, 25)
 	err = db.Select(&results, "SELECT "+
-		"p.id AS `id`,"+
-		"p.user_id AS `user_id`,"+
-		"p.body AS `body`,"+
-		"p.mime AS `mime`,"+
-		"p.created_at AS `created_at`, "+
-		"p.comment_count AS `comment_count`,"+
-		"u.id AS `user.id`, "+
-		"u.account_name AS `user.account_name` "+
-		"FROM `posts` p FORCE INDEX (posts_order_idx) JOIN `users` u ON p.user_id = u.id WHERE p.created_at <= ? AND u.del_flg = 0 ORDER BY p.created_at DESC LIMIT ?", t.Format(ISO8601Format), postsPerPage)
+		"`id` "+
+		"FROM `posts` FORCE INDEX (posts_order_idx) "+
+		"WHERE `created_at` <= ? ORDER BY `created_at` DESC LIMIT ?", t.Format(ISO8601Format), relaxPostPerPage)
 	if err != nil {
 		log.Print(err)
 		return
@@ -657,21 +659,7 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := []Post{}
-	err = db.Select(&results, "SELECT "+
-		"p.id AS `id`,"+
-		"p.user_id AS `user_id`,"+
-		"p.body AS `body`,"+
-		"p.mime AS `mime`,"+
-		"p.created_at AS `created_at`, "+
-		"p.comment_count AS `comment_count`,"+
-		"u.id AS `user.id`, "+
-		"u.account_name AS `user.account_name` "+
-		"FROM `posts` p FORCE INDEX (PRIMARY) JOIN `users` u ON p.user_id = u.id WHERE p.id = ? AND u.del_flg = 0 LIMIT ?", pid, postsPerPage)
-	if err != nil {
-		log.Print(err)
-		return
-	}
+	results := []int{pid}
 
 	posts, err := makePosts(results, getCSRFToken(r), true)
 	if err != nil {
@@ -751,13 +739,14 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	body := r.FormValue("body")
 	query := "INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (?,?,?,?)"
 	result, err := db.Exec(
 		query,
 		me.ID,
 		mime,
 		"",
-		r.FormValue("body"),
+		body,
 	)
 	if err != nil {
 		log.Print(err)
@@ -769,7 +758,25 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		log.Print(err)
 		return
 	}
-	writeImage(int(pid), mime, filedata)
+	id := int(pid)
+	n := time.Now()
+	writeImage(id, mime, filedata)
+
+	postLock.Lock()
+	postCache[id] = Post{
+		ID:           id,
+		UserID:       me.ID,
+		Mime:         mime,
+		Body:         body,
+		CommentCount: 0,
+		CreatedAt:    n,
+		Created:      n.Format("2006-01-02T15:04:05-07:00"),
+	}
+	postLock.Unlock()
+
+	recentCommentLock.Lock()
+	recentCommentCache[id] = []Comment{}
+	recentCommentLock.Unlock()
 
 	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)
 }
@@ -877,6 +884,12 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 	}
 	recentCommentCache[postID] = pc
 	recentCommentLock.Unlock()
+
+	postLock.Lock()
+	p := postCache[postID]
+	p.CommentCount++
+	postCache[postID] = p
+	postLock.Unlock()
 
 	http.Redirect(w, r, fmt.Sprintf("/posts/%d", postID), http.StatusFound)
 }

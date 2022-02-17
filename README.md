@@ -452,3 +452,10 @@ MiB Swap:   4096.0 total,   3813.2 free,    282.8 used.    497.7 avail Mem
    2218 www-data  20   0   56788   4672   2116 S  20.3   0.5   2:52.02 nginx
 ```
 
+## Cache Posts
+
+```
+{"pass":true,"score":549803,"success":526221,"fail":0,"messages":[]}
+{"pass":true,"score":544678,"success":521165,"fail":0,"messages":[]}
+{"pass":true,"score":543109,"success":519612,"fail":0,"messages":[]}
+```
