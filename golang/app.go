@@ -489,7 +489,7 @@ func getSFIndex(token string) ([]Post, error) {
 		err := db.Select(&results, "SELECT "+
 			"`id` "+
 			"FROM `posts` FORCE INDEX (posts_order_idx) "+
-			"ORDER BY ``created_at` DESC LIMIT ?", relaxPostPerPage)
+			"ORDER BY `created_at` DESC LIMIT ?", relaxPostPerPage)
 		if err != nil {
 			log.Print(err)
 			return nil, err
