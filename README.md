@@ -505,3 +505,27 @@ singleflightでcacheつくる。必要な時だけcacheをupdate
 {"pass":true,"score":637138,"success":595814,"fail":0,"messages":[]}
 ```
 
+## use fiber !
+
+fiber/fasthttpを使う
+
+```
+{"pass":true,"score":754500,"success":702446,"fail":0,"messages":[]}
+{"pass":true,"score":759413,"success":707031,"fail":0,"messages":[]}
+{"pass":true,"score":761191,"success":709146,"fail":0,"messages":[]}
+```
+
+CPUもさらに低く
+
+```
+Tasks:  99 total,   3 running,  96 sleeping,   0 stopped,   0 zombie
+%Cpu(s): 37.7 us, 23.1 sy,  0.0 ni, 18.6 id,  4.0 wa,  0.0 hi, 16.2 si,  0.3 st
+MiB Mem :    981.1 total,     67.5 free,    309.5 used,    604.0 buff/cache
+MiB Swap:   4096.0 total,   3729.6 free,    366.4 used.    522.4 avail Mem
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  37655 isucon    20   0 1376088  65472   9220 S  49.0   6.5   1:22.77 /home/isucon/private_isu/webapp/golang/app -bind 0.0.0.0:80
+  36053 mysql     20   0 1765660 120184   3192 S  37.0  12.0   9:36.78 /usr/sbin/mysqld
+  36873 www-data  20   0   56628   2636   1516 R  29.7   0.3   2:27.17 nginx: worker process
+  36872 www-data  20   0   56628   2644   1528 R  27.3   0.3   2:18.39 nginx: worker process 
+```
