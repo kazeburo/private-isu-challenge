@@ -550,3 +550,32 @@ MiB Swap:   4096.0 total,   3926.2 free,    169.8 used.    401.5 avail Mem
     818 www-data  20   0   56364   4036   1860 R  33.2   0.4   1:18.98 nginx: worker process
     817 www-data  20   0   56364   3992   1824 R  30.2   0.4   1:24.36 nginx: worker process
 ```
+
+## NO nginx
+
+nginxなくしても速くなる
+
+```
+$ sudo systemctl disable nginx
+$ sudo systemctl stop nginx
+```
+
+```
+{"pass":true,"score":986681,"success":916302,"fail":0,"messages":[]}
+{"pass":true,"score":978396,"success":907240,"fail":0,"messages":[]}
+{"pass":true,"score":968167,"success":900282,"fail":0,"messages":[]}
+```
+
+メモリは気になる
+
+```
+top - 16:25:14 up 35 min,  1 user,  load average: 1.78, 1.20, 1.05
+Tasks:  86 total,   2 running,  84 sleeping,   0 stopped,   0 zombie
+%Cpu(s): 42.1 us, 18.6 sy,  0.0 ni, 17.4 id,  4.9 wa,  0.0 hi, 16.9 si,  0.0 st
+MiB Mem :    981.1 total,     74.2 free,    620.1 used,    286.7 buff/cache
+MiB Swap:   4096.0 total,   3776.7 free,    319.2 used.    214.7 avail Mem
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+   1367 isucon    20   0 1871876 392696   5208 R 107.6  39.1   4:43.72 app
+    859 mysql     20   0 1734000 160404   5132 S  38.2  16.0   4:11.73 mysqld
+```

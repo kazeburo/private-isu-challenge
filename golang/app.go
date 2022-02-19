@@ -1039,7 +1039,7 @@ func main() {
 	app.Static("/img/ajax-loader.gif", "../public/img/ajax-loader.gif")
 	app.Static("/css/style.css", "../public/css/style.css")
 	app.Static("/favicon.ico", "../public/favicon.ico")
-	log.Fatal(app.Listen("0.0.0.0:8080"))
+	log.Fatal(app.Listen("0.0.0.0:80"))
 }
 
 type simpleCookie struct {
