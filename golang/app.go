@@ -878,7 +878,7 @@ func postComment(c *fiber.Ctx) error {
 	u := userCache[me.ID]
 	u.CommentCount++
 	userCache[me.ID] = u
-	userLock.RLock()
+	userLock.Unlock()
 
 	return c.Redirect("/posts/"+strconv.Itoa(postID), fiber.StatusFound)
 }
