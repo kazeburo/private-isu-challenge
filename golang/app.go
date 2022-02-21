@@ -55,12 +55,13 @@ const (
 )
 
 type User struct {
-	ID          int       `db:"id"`
-	AccountName string    `db:"account_name"`
-	Passhash    string    `db:"passhash"`
-	Authority   int       `db:"authority"`
-	DelFlg      int       `db:"del_flg"`
-	CreatedAt   time.Time `db:"created_at"`
+	ID           int       `db:"id"`
+	AccountName  string    `db:"account_name"`
+	Passhash     string    `db:"passhash"`
+	Authority    int       `db:"authority"`
+	DelFlg       int       `db:"del_flg"`
+	CreatedAt    time.Time `db:"created_at"`
+	CommentCount int       `db:"comment_count"`
 }
 
 type Post struct {
@@ -134,7 +135,7 @@ func dbInitialize() {
 
 func warmupCache() {
 	users := []User{}
-	db.Select(&users, "SELECT `id`, `account_name`, `passhash`, `authority`, `del_flg` FROM `users`")
+	db.Select(&users, "SELECT `id`, `account_name`, `passhash`, `authority`, `del_flg`, (SELECT COUNT(id) FROM comments WHERE comments.user_id = users.id) AS `comment_count` FROM `users`")
 	uc := map[int]User{}
 	accounts := map[string]int{}
 	for _, u := range users {
@@ -531,6 +532,7 @@ func getAccountName(c *fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusNotFound)
 	}
 	user := userCache[uid]
+	commentCount := user.CommentCount
 	userLock.RUnlock()
 
 	if user.ID == 0 || user.DelFlg != 0 {
@@ -551,15 +553,6 @@ func getAccountName(c *fiber.Ctx) error {
 		}
 
 		posts, err = makePosts(results, token, false)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-
-	commentCount := 0
-	eg.Go(func() error {
-		err := db.Get(&commentCount, "SELECT COUNT(*) AS count FROM `comments` WHERE `user_id` = ?", user.ID)
 		if err != nil {
 			return err
 		}
@@ -880,6 +873,12 @@ func postComment(c *fiber.Ctx) error {
 	p.CommentCount++
 	postCache[postID] = p
 	postLock.Unlock()
+
+	userLock.Lock()
+	u := userCache[me.ID]
+	u.CommentCount++
+	userCache[me.ID] = u
+	userLock.RLock()
 
 	return c.Redirect("/posts/"+strconv.Itoa(postID), fiber.StatusFound)
 }
