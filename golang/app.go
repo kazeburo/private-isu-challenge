@@ -27,7 +27,6 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/mojura/enkodo"
 	"github.com/valyala/bytebufferpool"
-	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -55,13 +54,15 @@ const (
 )
 
 type User struct {
-	ID           int       `db:"id"`
-	AccountName  string    `db:"account_name"`
-	Passhash     string    `db:"passhash"`
-	Authority    int       `db:"authority"`
-	DelFlg       int       `db:"del_flg"`
-	CreatedAt    time.Time `db:"created_at"`
-	CommentCount int       `db:"comment_count"`
+	ID               int       `db:"id"`
+	AccountName      string    `db:"account_name"`
+	Passhash         string    `db:"passhash"`
+	Authority        int       `db:"authority"`
+	DelFlg           int       `db:"del_flg"`
+	CreatedAt        time.Time `db:"created_at"`
+	CommentCount     int       `db:"comment_count"`
+	PostCount        int       `db:"post_count"`
+	PostCommentCount int       `db:"post_comment_count"`
 }
 
 type Post struct {
@@ -135,7 +136,11 @@ func dbInitialize() {
 
 func warmupCache() {
 	users := []User{}
-	db.Select(&users, "SELECT `id`, `account_name`, `passhash`, `authority`, `del_flg`, (SELECT COUNT(id) FROM comments WHERE comments.user_id = users.id) AS `comment_count` FROM `users`")
+	db.Select(&users, "SELECT `id`, `account_name`, `passhash`, `authority`, `del_flg`,"+
+		"(SELECT COUNT(id) FROM comments WHERE comments.user_id = users.id) AS `comment_count`,"+
+		"(SELECT count(`id`) FROM `posts` WHERE posts.user_id = users.id) AS `post_count`,"+
+		"(SELECT IFNULL(sum(posts.`comment_count`),0) FROM `posts` WHERE posts.user_id = users.id) AS `post_comment_count`"+
+		"FROM `users`")
 	uc := map[int]User{}
 	accounts := map[string]int{}
 	for _, u := range users {
@@ -533,46 +538,26 @@ func getAccountName(c *fiber.Ctx) error {
 	}
 	user := userCache[uid]
 	commentCount := user.CommentCount
+	commentedCount := user.PostCommentCount
+	postCount := user.PostCount
 	userLock.RUnlock()
 
 	if user.ID == 0 || user.DelFlg != 0 {
 		return c.SendStatus(fiber.StatusNotFound)
 	}
 
-	var eg errgroup.Group
-	posts := make([]Post, 0, postsPerPage)
-	token := getCSRFToken(c)
-	eg.Go(func() error {
-		results := make([]int, 0, relaxPostPerPage)
-		err := db.Select(&results, "SELECT "+
-			"`id` "+
-			"FROM `posts` FORCE INDEX (posts_user_idx) WHERE `user_id` = ? "+
-			"ORDER BY `created_at` DESC LIMIT ?", user.ID, relaxPostPerPage)
-		if err != nil {
-			return err
-		}
+	results := make([]int, 0, relaxPostPerPage)
+	err := db.Select(&results, "SELECT "+
+		"`id` "+
+		"FROM `posts` FORCE INDEX (posts_user_idx) WHERE `user_id` = ? "+
+		"ORDER BY `created_at` DESC LIMIT ?", user.ID, relaxPostPerPage)
+	if err != nil {
+		log.Print(err)
+		return c.SendStatus(fiber.StatusInternalServerError)
+	}
 
-		posts, err = makePosts(results, token, false)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-
-	commentedCount := 0
-	postCount := 0
-	eg.Go(func() error {
-		res := PostSummary{}
-		err := db.Get(&res, "SELECT count(`id`) as c,IFNULL(sum(`comment_count`),0) as s FROM `posts` WHERE `user_id` = ?", user.ID)
-		if err != nil {
-			return err
-		}
-		postCount = res.Count
-		commentedCount = res.Sum
-		return nil
-	})
-
-	if err := eg.Wait(); err != nil {
+	posts, err := makePosts(results, getCSRFToken(c), false)
+	if err != nil {
 		log.Print(err)
 		return c.SendStatus(fiber.StatusInternalServerError)
 	}
@@ -742,6 +727,12 @@ func postIndex(c *fiber.Ctx) error {
 	recentCommentCache[id] = []Comment{}
 	recentCommentLock.Unlock()
 
+	userLock.Lock()
+	u := userCache[me.ID]
+	u.PostCount++
+	userCache[me.ID] = u
+	userLock.Unlock()
+
 	updateIndex()
 
 	return c.Redirect("/posts/"+strconv.FormatInt(pid, 10), fiber.StatusFound)
@@ -878,6 +869,9 @@ func postComment(c *fiber.Ctx) error {
 	u := userCache[me.ID]
 	u.CommentCount++
 	userCache[me.ID] = u
+	u2 := userCache[p.UserID]
+	u2.PostCommentCount++
+	userCache[p.UserID] = u2
 	userLock.Unlock()
 
 	return c.Redirect("/posts/"+strconv.Itoa(postID), fiber.StatusFound)
