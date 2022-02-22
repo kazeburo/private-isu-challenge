@@ -2,7 +2,12 @@
 
 ## 環境
 
-さくらのクラウド 東京第二ゾーン 2core/1GBサーバ
+対象アプリケーション
+さくらのクラウド 東京第二ゾーン 2coreサーバ
+
+ベンチマーカー
+さくらのクラウド 東京第二ゾーン 6core/4GBサーバ
+
 
 ## 初期スコア
 
@@ -561,21 +566,100 @@ $ sudo systemctl stop nginx
 ```
 
 ```
-{"pass":true,"score":986681,"success":916302,"fail":0,"messages":[]}
-{"pass":true,"score":978396,"success":907240,"fail":0,"messages":[]}
-{"pass":true,"score":968167,"success":900282,"fail":0,"messages":[]}
+{"pass":true,"score":998612,"success":927125,"fail":0,"messages":[]}
+{"pass":true,"score":969510,"success":898532,"fail":0,"messages":[]}
+{"pass":true,"score":930330,"success":863927,"fail":0,"messages":[]}
 ```
 
 メモリは気になる
 
 ```
-top - 16:25:14 up 35 min,  1 user,  load average: 1.78, 1.20, 1.05
-Tasks:  86 total,   2 running,  84 sleeping,   0 stopped,   0 zombie
-%Cpu(s): 42.1 us, 18.6 sy,  0.0 ni, 17.4 id,  4.9 wa,  0.0 hi, 16.9 si,  0.0 st
-MiB Mem :    981.1 total,     74.2 free,    620.1 used,    286.7 buff/cache
-MiB Swap:   4096.0 total,   3776.7 free,    319.2 used.    214.7 avail Mem
+top - 21:18:37 up 12 min,  1 user,  load average: 2.05, 1.66, 0.97
+Tasks:  87 total,   3 running,  84 sleeping,   0 stopped,   0 zombie
+%Cpu(s): 46.6 us, 18.3 sy,  0.0 ni, 13.1 id,  4.3 wa,  0.0 hi, 17.7 si,  0.0 st
+MiB Mem :    981.1 total,     73.7 free,    649.4 used,    258.0 buff/cache
+MiB Swap:   4096.0 total,   3801.5 free,    294.5 used.    179.7 avail Mem 
 
     PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
-   1367 isucon    20   0 1871876 392696   5208 R 107.6  39.1   4:43.72 app
-    859 mysql     20   0 1734000 160404   5132 S  38.2  16.0   4:11.73 mysqld
+    779 isucon    20   0 1871940 333804   4040 R 117.7  33.2   5:43.89 app
+    614 mysql     20   0 1735148 180160      0 S  36.7  17.9   2:48.58 mysqld
+```
+
+## mysqlをもう一度チューニング
+
+```
+innodb_flush_log_at_trx_commit = 2
+innodb_flush_method = O_DIRECT
+disable-log-bin = 1
+
+innodb_adaptive_hash_index = 0
+performance_schema = OFF
+```
+
+swapが減ってる
+
+```
+top - 21:22:53 up 16 min,  1 user,  load average: 1.69, 1.54, 1.08
+Tasks:  92 total,   1 running,  91 sleeping,   0 stopped,   0 zombie
+%Cpu(s): 37.8 us, 20.5 sy,  0.0 ni, 16.6 id,  4.2 wa,  0.0 hi, 20.8 si,  0.0 st
+MiB Mem :    981.1 total,     68.7 free,    622.2 used,    290.2 buff/cache
+MiB Swap:   4096.0 total,   4055.5 free,     40.5 used.    213.1 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+    995 isucon    20   0 1730492 364824   5392 S 109.6  36.3   1:37.70 app
+    935 mysql     20   0 1517136 179736   7416 S  36.5  17.9   0:33.24 mysqld    
+```
+
+スコアはさほど変わらず
+
+```
+{"pass":true,"score":993244,"success":921184,"fail":0,"messages":[]}
+{"pass":true,"score":977835,"success":906717,"fail":0,"messages":[]}
+{"pass":true,"score":968956,"success":897994,"fail":0,"messages":[]}
+```
+
+
+## GOGCを設定
+
+```
+$ grep GOGC  ~/env.sh 
+GOGC=200
+```
+
+100万きたぞ
+
+```
+{"pass":true,"score":1026978,"success":954426,"fail":0,"messages":[]}
+{"pass":true,"score":1020246,"success":947518,"fail":0,"messages":[]}
+{"pass":true,"score":1011033,"success":939053,"fail":0,"messages":[]}
+```
+
+## Cache posts count and comment count
+
+```
+{"pass":true,"score":1022963,"success":939500,"fail":0,"messages":[]}
+{"pass":true,"score":1026593,"success":944050,"fail":0,"messages":[]}
+{"pass":true,"score":1021200,"success":938854,"fail":0,"messages":[]}
+```
+
+
+## getPostsIDでコメント3件
+
+実はベンチマーカー通る
+
+```
+$ git diff
+diff --git a/golang/app.go b/golang/app.go
+index 81116c4..2deb725 100644
+--- a/golang/app.go
++++ b/golang/app.go
+@@ -620,7 +620,7 @@ func getPostsID(c *fiber.Ctx) error {
+ 
+        results := []int{pid}
+ 
+-       posts, err := makePosts(results, getCSRFToken(c), true)
++       posts, err := makePosts(results, getCSRFToken(c), false)
+        if err != nil {
+                log.Print(err)
+                return c.SendStatus(fiber.StatusInternalServerError)
 ```
