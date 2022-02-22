@@ -5,6 +5,7 @@ import (
 	crand "crypto/rand"
 	"crypto/sha512"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"html/template"
 	"io"
@@ -216,7 +217,8 @@ func validateUser(accountName, password string) bool {
 }
 
 func digest(src string) string {
-	return fmt.Sprintf("%x", sha512.Sum512([]byte(src)))
+	b := sha512.Sum512(UnsafeBytes(src))
+	return hex.EncodeToString(b[:])
 }
 
 func calculateSalt(accountName string) string {
@@ -346,7 +348,7 @@ func secureRandomStr(b int) string {
 	if _, err := crand.Read(k); err != nil {
 		panic(err)
 	}
-	return fmt.Sprintf("%x", k)
+	return hex.EncodeToString(k)
 }
 
 func getTemplPath(filename string) string {
