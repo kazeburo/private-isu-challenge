@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/profiler"
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 	"github.com/gofiber/fiber/v2"
 	"github.com/jmoiron/sqlx"
 	"github.com/mojura/enkodo"
@@ -420,19 +420,6 @@ func postRegister(c *fiber.Ctx) error {
 		session := getSession(c)
 		session.Values.Notice = "アカウント名は3文字以上、パスワードは6文字以上である必要があります"
 		session.Save(c)
-
-		return c.Redirect("/register", fiber.StatusFound)
-	}
-
-	exists := 0
-	// ユーザーが存在しない場合はエラーになるのでエラーチェックはしない
-	db.Get(&exists, "SELECT 1 FROM users WHERE `account_name` = ?", accountName)
-
-	if exists == 1 {
-		session := getSession(c)
-		session.Values.Notice = "アカウント名がすでに使われています"
-		session.Save(c)
-
 		return c.Redirect("/register", fiber.StatusFound)
 	}
 
@@ -440,11 +427,18 @@ func postRegister(c *fiber.Ctx) error {
 	query := "INSERT INTO `users` (`account_name`, `passhash`) VALUES (?,?)"
 	result, err := db.Exec(query, accountName, pw)
 	if err != nil {
+		if mysqlErr, ok := err.(*mysql.MySQLError); ok {
+			if mysqlErr.Number == 1062 {
+				session := getSession(c)
+				session.Values.Notice = "アカウント名がすでに使われています"
+				session.Save(c)
+				return c.Redirect("/register", fiber.StatusFound)
+			}
+		}
 		log.Print(err)
 		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
-	session := getSession(c)
 	uid, err := result.LastInsertId()
 	if err != nil {
 		log.Print(err)
@@ -460,6 +454,7 @@ func postRegister(c *fiber.Ctx) error {
 	accountCache[accountName] = int(uid)
 	userLock.Unlock()
 
+	session := getSession(c)
 	session.Values.UserID = int(uid)
 	session.Values.CSRFToken = secureRandomStr(16)
 	session.Save(c)
