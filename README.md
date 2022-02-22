@@ -641,25 +641,3 @@ GOGC=200
 {"pass":true,"score":1026593,"success":944050,"fail":0,"messages":[]}
 {"pass":true,"score":1021200,"success":938854,"fail":0,"messages":[]}
 ```
-
-
-## getPostsIDでコメント3件
-
-実はベンチマーカー通る
-
-```
-$ git diff
-diff --git a/golang/app.go b/golang/app.go
-index 81116c4..2deb725 100644
---- a/golang/app.go
-+++ b/golang/app.go
-@@ -620,7 +620,7 @@ func getPostsID(c *fiber.Ctx) error {
- 
-        results := []int{pid}
- 
--       posts, err := makePosts(results, getCSRFToken(c), true)
-+       posts, err := makePosts(results, getCSRFToken(c), false)
-        if err != nil {
-                log.Print(err)
-                return c.SendStatus(fiber.StatusInternalServerError)
-```
