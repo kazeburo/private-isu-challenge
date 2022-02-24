@@ -148,7 +148,8 @@ func warmupCache() {
 	uc := map[int]*User{}
 	accounts := map[string]int{}
 	delflags := map[int]interface{}{}
-	for _, u := range users {
+	for uid := range users {
+		u := users[uid]
 		uc[u.ID] = &u
 		accounts[u.AccountName] = u.ID
 		if u.DelFlg == 1 {
@@ -168,7 +169,8 @@ func warmupCache() {
 	for _, p := range posts {
 		p.Created = p.CreatedAt.Format("2006-01-02T15:04:05-07:00")
 		userLock.RLock()
-		p.UserName = userCache[p.UserID].AccountName
+		u := userCache[p.UserID]
+		p.UserName = u.AccountName
 		userLock.RUnlock()
 		postsMap[p.ID] = p
 	}
