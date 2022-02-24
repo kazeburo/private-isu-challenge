@@ -41,7 +41,7 @@ var (
 	recentCommentLock  sync.RWMutex
 	recentCommentCache map[int][]Comment
 	userLock           sync.RWMutex
-	userCache          map[int]User
+	userCache          map[int]*User
 	delFlgCache        map[int]interface{}
 	accountCache       map[string]int
 	sfGroup            singleflight.Group
@@ -145,11 +145,11 @@ func warmupCache() {
 		"(SELECT count(`id`) FROM `posts` WHERE posts.user_id = users.id) AS `post_count`,"+
 		"(SELECT IFNULL(sum(posts.`comment_count`),0) FROM `posts` WHERE posts.user_id = users.id) AS `post_comment_count`"+
 		"FROM `users`")
-	uc := map[int]User{}
+	uc := map[int]*User{}
 	accounts := map[string]int{}
 	delflags := map[int]interface{}{}
 	for _, u := range users {
-		uc[u.ID] = u
+		uc[u.ID] = &u
 		accounts[u.AccountName] = u.ID
 		if u.DelFlg == 1 {
 			delflags[u.ID] = emptyInterface
@@ -211,7 +211,7 @@ func tryLogin(accountName, password string) *User {
 	userLock.RUnlock()
 
 	if calculatePasshash(u.AccountName, password) == u.Passhash {
-		return &u
+		return u
 	} else {
 		return nil
 	}
@@ -246,7 +246,7 @@ func getSession(c *fiber.Ctx) *simpleCookie {
 	return session
 }
 
-func getSessionUser(c *fiber.Ctx) User {
+func getSessionUser(c *fiber.Ctx) *User {
 	session := getSession(c)
 	id := session.Values.UserID
 
@@ -254,7 +254,7 @@ func getSessionUser(c *fiber.Ctx) User {
 	u, ok := userCache[id]
 	userLock.RUnlock()
 	if !ok {
-		return User{}
+		return &User{}
 	}
 	return u
 }
@@ -342,7 +342,7 @@ func makePosts(results []int, csrfToken string, allComments bool) ([]Post, error
 	return posts, nil
 }
 
-func isLogin(u User) bool {
+func isLogin(u *User) bool {
 	return u.ID != 0
 }
 
@@ -454,7 +454,7 @@ func postRegister(c *fiber.Ctx) error {
 	}
 
 	userLock.Lock()
-	userCache[int(uid)] = User{
+	userCache[int(uid)] = &User{
 		ID:          int(uid),
 		AccountName: CopyString(accountName),
 		Passhash:    pw,
@@ -903,7 +903,7 @@ func getAdminBanned(c *fiber.Ctx) error {
 
 	templBanned.Execute(c.Status(fiber.StatusOK), struct {
 		Users     []User
-		Me        User
+		Me        *User
 		CSRFToken string
 	}{users, me, getCSRFToken(c)})
 	return nil
@@ -1139,7 +1139,7 @@ func sessionGet(c *fiber.Ctx, key string) (*simpleCookie, error) {
 	return newSession, nil
 }
 
-func loginHTML(dest io.Writer, me User, flash string) (int, error) {
+func loginHTML(dest io.Writer, me *User, flash string) (int, error) {
 	b := bytebufferpool.Get()
 	defer func() {
 		bytebufferpool.Put(b)
@@ -1175,7 +1175,7 @@ func loginHTML(dest io.Writer, me User, flash string) (int, error) {
 	return dest.Write(b.Bytes())
 }
 
-func indexHTML(dest io.Writer, posts []byte, me User, token string, flash string) (int, error) {
+func indexHTML(dest io.Writer, posts []byte, me *User, token string, flash string) (int, error) {
 	b := bytebufferpool.Get()
 	defer func() {
 		bytebufferpool.Put(b)
@@ -1212,7 +1212,7 @@ func indexHTML(dest io.Writer, posts []byte, me User, token string, flash string
 	return dest.Write(b.Bytes())
 }
 
-func postIDHTML(dest io.Writer, p Post, me User) (int, error) {
+func postIDHTML(dest io.Writer, p Post, me *User) (int, error) {
 	b := bytebufferpool.Get()
 	defer func() {
 		bytebufferpool.Put(b)
@@ -1226,11 +1226,11 @@ func postIDHTML(dest io.Writer, p Post, me User) (int, error) {
 func userHTML(
 	dest io.Writer,
 	ps []Post,
-	user User,
+	user *User,
 	postCount int,
 	commentCount int,
 	commentedCount int,
-	me User,
+	me *User,
 ) (int, error) {
 	b := bytebufferpool.Get()
 	defer func() {
@@ -1292,7 +1292,7 @@ func postsHTML(dest io.Writer, ps []Post) (int, error) {
 	return dest.Write(b.Bytes())
 }
 
-func layoutHTMLheader(b *bytebufferpool.ByteBuffer, me User) (int, error) {
+func layoutHTMLheader(b *bytebufferpool.ByteBuffer, me *User) (int, error) {
 	b.WriteString(`<!DOCTYPE html>
 <html>
 <head>
