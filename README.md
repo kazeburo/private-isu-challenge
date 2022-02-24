@@ -6,7 +6,7 @@
 さくらのクラウド 東京第二ゾーン 2coreサーバ
 
 ベンチマーカー
-さくらのクラウド 東京第二ゾーン 6core/4GBサーバ
+さくらのクラウド 東京第二ゾーン 4core/8GBサーバ
 
 
 ## 初期スコア
@@ -640,4 +640,40 @@ GOGC=200
 {"pass":true,"score":1022963,"success":939500,"fail":0,"messages":[]}
 {"pass":true,"score":1026593,"success":944050,"fail":0,"messages":[]}
 {"pass":true,"score":1021200,"success":938854,"fail":0,"messages":[]}
+```
+
+## getPostsID returns few comments
+
+コメント全件返さなくてもベンチマーカー通ります
+
+```
+diff --git a/golang/app.go b/golang/app.go
+index 81116c4..2deb725 100644
+--- a/golang/app.go
++++ b/golang/app.go
+@@ -620,7 +620,7 @@ func getPostsID(c *fiber.Ctx) error {
+ 
+        results := []int{pid}
+ 
+-       posts, err := makePosts(results, getCSRFToken(c), true)
++       posts, err := makePosts(results, getCSRFToken(c), false)
+        if err != nil {
+                log.Print(err)
+                return c.SendStatus(fiber.StatusInternalServerError)
+```
+
+```
+{"pass":true,"score":1074046,"success":990330,"fail":0,"messages":[]}
+{"pass":true,"score":1062199,"success":979458,"fail":0,"messages":[]}
+{"pass":true,"score":1065751,"success":983263,"fail":0,"messages":[]}
+```
+
+### ベンチマーカー側でGOGC
+
+```
+$ export GOGC=500
+$ ./bin/benchmarker -t "http://192.168.0.43" -u $PWD/userdata &&  ./bin/benchmarker -t "http://192.168.0.43" -u $PWD/userdata &&  ./bin/benchmarker -t "http://192.168.0.43" -u $PWD/userdata
+{"pass":true,"score":1108183,"success":1022532,"fail":0,"messages":[]}
+{"pass":true,"score":1107682,"success":1021867,"fail":0,"messages":[]}
+{"pass":true,"score":1100150,"success":1014502,"fail":0,"messages":[]}
 ```
