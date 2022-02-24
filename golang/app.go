@@ -939,7 +939,7 @@ func postAdminBanned(c *fiber.Ctx) error {
 		i, _ := strconv.Atoi(id)
 		u := userCache[i]
 		u.DelFlg = 1
-		userCache[i] = u
+		//userCache[i] = u
 		delFlgCache[i] = emptyInterface
 	}
 	userLock.Unlock()
