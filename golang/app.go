@@ -37,9 +37,9 @@ var (
 	templRegister      *template.Template
 	templBanned        *template.Template
 	postLock           sync.RWMutex
-	postCache          map[int]Post
+	postCache          map[int]*Post
 	recentCommentLock  sync.RWMutex
-	recentCommentCache map[int][]Comment
+	recentCommentCache map[int][]*Comment
 	userLock           sync.RWMutex
 	userCache          map[int]*User
 	delFlgCache        map[int]interface{}
@@ -78,7 +78,7 @@ type Post struct {
 	CreatedAt    time.Time `db:"created_at"`
 	Created      string
 	CommentCount int `db:"comment_count"`
-	Comments     []Comment
+	Comments     []*Comment
 	UserName     string `db:"user_name"`
 	CSRFToken    string
 }
@@ -165,20 +165,21 @@ func warmupCache() {
 
 	posts := []Post{}
 	db.Select(&posts, "SELECT `id`, `user_id`, `body`, `mime`, `comment_count`,`created_at` FROM `posts`")
-	postsMap := map[int]Post{}
-	for _, p := range posts {
+	postsMap := map[int]*Post{}
+	for pid := range posts {
+		p := posts[pid]
 		p.Created = p.CreatedAt.Format("2006-01-02T15:04:05-07:00")
 		userLock.RLock()
 		u := userCache[p.UserID]
 		p.UserName = u.AccountName
 		userLock.RUnlock()
-		postsMap[p.ID] = p
+		postsMap[p.ID] = &p
 	}
 	postLock.Lock()
 	postCache = postsMap
 	postLock.Unlock()
 
-	recentCommentMap := map[int][]Comment{}
+	recentCommentMap := map[int][]*Comment{}
 	comments := []Comment{}
 	query := "SELECT " +
 		"c.id AS `id`," +
@@ -193,7 +194,7 @@ func warmupCache() {
 		i = len(comments) - 1 - i
 		for _, p := range posts {
 			if p.ID == comments[i].PostID {
-				recentCommentMap[p.ID] = append(recentCommentMap[p.ID], comments[i])
+				recentCommentMap[p.ID] = append(recentCommentMap[p.ID], &comments[i])
 			}
 		}
 	}
@@ -274,8 +275,8 @@ func getFlash(c *fiber.Ctx) string {
 	}
 }
 
-func makePosts(results []int, csrfToken string, allComments bool) ([]Post, error) {
-	posts := make([]Post, 0, postsPerPage)
+func makePosts(results []int, csrfToken string, allComments bool) ([]*Post, error) {
+	posts := make([]*Post, 0, postsPerPage)
 	commentPostIDs := make([]int, 0, postsPerPage)
 	totalComment := 0
 	for _, i := range results {
@@ -292,7 +293,7 @@ func makePosts(results []int, csrfToken string, allComments bool) ([]Post, error
 			recentCommentLock.RUnlock()
 		}
 		if p.CommentCount > 3 && allComments {
-			p.Comments = make([]Comment, 0, p.CommentCount)
+			p.Comments = make([]*Comment, 0, p.CommentCount)
 			commentPostIDs = append(commentPostIDs, p.ID)
 			totalComment += p.CommentCount
 		}
@@ -335,7 +336,7 @@ func makePosts(results []int, csrfToken string, allComments bool) ([]Post, error
 			i = len(comments) - 1 - i
 			for k := range posts {
 				if posts[k].ID == comments[i].PostID {
-					posts[k].Comments = append(posts[k].Comments, comments[i])
+					posts[k].Comments = append(posts[k].Comments, &comments[i])
 				}
 			}
 		}
@@ -720,7 +721,7 @@ func postIndex(c *fiber.Ctx) error {
 
 	n := time.Now()
 	postLock.Lock()
-	postCache[id] = Post{
+	postCache[id] = &Post{
 		ID:           id,
 		UserID:       me.ID,
 		Mime:         mime,
@@ -733,7 +734,7 @@ func postIndex(c *fiber.Ctx) error {
 	postLock.Unlock()
 
 	recentCommentLock.Lock()
-	recentCommentCache[id] = []Comment{}
+	recentCommentCache[id] = []*Comment{}
 	recentCommentLock.Unlock()
 
 	userLock.Lock()
@@ -856,7 +857,7 @@ func postComment(c *fiber.Ctx) error {
 
 	recentCommentLock.Lock()
 	pc := recentCommentCache[postID]
-	pc = append(pc, Comment{
+	pc = append(pc, &Comment{
 		ID:      int(cid),
 		PostID:  postID,
 		UserID:  me.ID,
@@ -1214,7 +1215,7 @@ func indexHTML(dest io.Writer, posts []byte, me *User, token string, flash strin
 	return dest.Write(b.Bytes())
 }
 
-func postIDHTML(dest io.Writer, p Post, me *User) (int, error) {
+func postIDHTML(dest io.Writer, p *Post, me *User) (int, error) {
 	b := bytebufferpool.Get()
 	defer func() {
 		bytebufferpool.Put(b)
@@ -1227,7 +1228,7 @@ func postIDHTML(dest io.Writer, p Post, me *User) (int, error) {
 
 func userHTML(
 	dest io.Writer,
-	ps []Post,
+	ps []*Post,
 	user *User,
 	postCount int,
 	commentCount int,
@@ -1281,7 +1282,7 @@ func escapeHTMLWriter(b *bytebufferpool.ByteBuffer, s string) {
 	}
 }
 
-func postsHTML(dest io.Writer, ps []Post) (int, error) {
+func postsHTML(dest io.Writer, ps []*Post) (int, error) {
 	b := bytebufferpool.Get()
 	defer func() {
 		bytebufferpool.Put(b)
@@ -1334,7 +1335,7 @@ func layoutHTMLfooter(b *bytebufferpool.ByteBuffer) (int, error) {
 </html>`)
 }
 
-func postHTML(b *bytebufferpool.ByteBuffer, p Post) {
+func postHTML(b *bytebufferpool.ByteBuffer, p *Post) {
 	sID := strconv.Itoa(p.ID)
 	b.WriteString(`<div class="isu-post" id="pid_`)
 	b.WriteString(sID)
