@@ -42,10 +42,12 @@ var (
 	recentCommentCache map[int][]Comment
 	userLock           sync.RWMutex
 	userCache          map[int]User
+	delFlgCache        map[int]interface{}
 	accountCache       map[string]int
 	sfGroup            singleflight.Group
 	indexCache         []byte
 	indexLock          sync.RWMutex
+	emptyInterface     interface{}
 )
 
 const (
@@ -77,7 +79,7 @@ type Post struct {
 	Created      string
 	CommentCount int `db:"comment_count"`
 	Comments     []Comment
-	User         User
+	UserName     string `db:"user_name"`
 	CSRFToken    string
 }
 
@@ -87,7 +89,7 @@ type Comment struct {
 	UserID    int       `db:"user_id"`
 	Comment   string    `db:"comment"`
 	CreatedAt time.Time `db:"created_at"`
-	User      User
+	UserName  string    `db:"user_name"`
 }
 
 type PostSummary struct {
@@ -145,14 +147,19 @@ func warmupCache() {
 		"FROM `users`")
 	uc := map[int]User{}
 	accounts := map[string]int{}
+	delflags := map[int]interface{}{}
 	for _, u := range users {
 		uc[u.ID] = u
 		accounts[u.AccountName] = u.ID
+		if u.DelFlg == 0 {
+			delflags[u.ID] = emptyInterface
+		}
 
 	}
 	userLock.Lock()
 	userCache = uc
 	accountCache = accounts
+	delFlgCache = delflags
 	userLock.Unlock()
 
 	posts := []Post{}
@@ -160,6 +167,9 @@ func warmupCache() {
 	postsMap := map[int]Post{}
 	for _, p := range posts {
 		p.Created = p.CreatedAt.Format("2006-01-02T15:04:05-07:00")
+		userLock.RLock()
+		p.UserName = userCache[p.UserID].AccountName
+		userLock.RUnlock()
 		postsMap[p.ID] = p
 	}
 	postLock.Lock()
@@ -173,8 +183,7 @@ func warmupCache() {
 		"c.post_id AS `post_id`," +
 		"c.user_id AS `user_id`," +
 		"c.comment AS `comment`," +
-		"u.id AS `user.id`, " +
-		"u.account_name AS `user.account_name` " +
+		"u.account_name AS `user_name` " +
 		"FROM (SELECT `id`,`post_id`,`user_id`,`comment`,`created_at`, RANK() OVER (PARTITION BY `post_id` ORDER BY `created_at`) AS `r` FROM `comments`) AS c JOIN `users` u ON c.user_id = u.id WHERE `r` <= 3 ORDER BY c.created_at DESC"
 
 	db.Select(&comments, query)
@@ -288,10 +297,10 @@ func makePosts(results []int, csrfToken string, allComments bool) ([]Post, error
 
 		p.CSRFToken = csrfToken
 		userLock.RLock()
-		p.User = userCache[p.UserID]
+		_, isDel := delFlgCache[p.UserID]
 		userLock.RUnlock()
 
-		if p.User.DelFlg == 0 {
+		if !isDel {
 			posts = append(posts, p)
 		}
 		if len(posts) >= postsPerPage {
@@ -309,8 +318,7 @@ func makePosts(results []int, csrfToken string, allComments bool) ([]Post, error
 			"c.post_id AS `post_id`," +
 			"c.user_id AS `user_id`," +
 			"c.comment AS `comment`," +
-			"u.id AS `user.id`, " +
-			"u.account_name AS `user.account_name` " +
+			"u.account_name AS `user_name` " +
 			"FROM `comments` c JOIN `users` u ON c.user_id = u.id " +
 			"WHERE c.post_id IN (" +
 			strings.Join(b, ",") +
@@ -718,6 +726,7 @@ func postIndex(c *fiber.Ctx) error {
 		CommentCount: 0,
 		CreatedAt:    n,
 		Created:      n.Format("2006-01-02T15:04:05-07:00"),
+		UserName:     me.AccountName,
 	}
 	postLock.Unlock()
 
@@ -931,6 +940,7 @@ func postAdminBanned(c *fiber.Ctx) error {
 		u := userCache[i]
 		u.DelFlg = 1
 		userCache[i] = u
+		delFlgCache[i] = emptyInterface
 	}
 	userLock.Unlock()
 	return c.Redirect("/admin/banned", fiber.StatusFound)
@@ -1331,9 +1341,9 @@ func postHTML(b *bytebufferpool.ByteBuffer, p Post) {
 	b.WriteString(`">
 <div class="isu-post-header">
 <a href="/@`)
-	b.WriteString(p.User.AccountName)
+	b.WriteString(p.UserName)
 	b.WriteString(`" class="isu-post-account-name">`)
-	b.WriteString(p.User.AccountName)
+	b.WriteString(p.UserName)
 	b.WriteString(`</a>
 <a href="/posts/`)
 	b.WriteString(sID)
@@ -1357,9 +1367,9 @@ func postHTML(b *bytebufferpool.ByteBuffer, p Post) {
 </div>
 <div class="isu-post-text">
 <a href="/@`)
-	b.WriteString(p.User.AccountName)
+	b.WriteString(p.UserName)
 	b.WriteString(`" class="isu-post-account-name">`)
-	b.WriteString(p.User.AccountName)
+	b.WriteString(p.UserName)
 	b.WriteString(`</a>`)
 	escapeHTMLWriter(b, p.Body)
 	b.WriteString(`</div>
@@ -1373,9 +1383,9 @@ comments: <b>`)
 	for _, c := range p.Comments {
 		b.WriteString(`<div class="isu-comment">
 <a href="/@`)
-		b.WriteString(c.User.AccountName)
+		b.WriteString(c.UserName)
 		b.WriteString(`" class="isu-comment-account-name">`)
-		b.WriteString(c.User.AccountName)
+		b.WriteString(c.UserName)
 		b.WriteString(`</a>
 <span class="isu-comment-text">`)
 		escapeHTMLWriter(b, c.Comment)
