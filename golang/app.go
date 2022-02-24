@@ -151,7 +151,7 @@ func warmupCache() {
 	for _, u := range users {
 		uc[u.ID] = u
 		accounts[u.AccountName] = u.ID
-		if u.DelFlg == 0 {
+		if u.DelFlg == 1 {
 			delflags[u.ID] = emptyInterface
 		}
 
